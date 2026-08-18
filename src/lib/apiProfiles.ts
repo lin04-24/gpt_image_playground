@@ -136,6 +136,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+function normalizeModels(value: unknown): Array<{ id: string; enabled: boolean }> | undefined {
+  if (!Array.isArray(value)) return undefined
+  const models = value
+    .map((item) => {
+      if (typeof item === 'string' && item.trim()) return { id: item.trim(), enabled: true }
+      if (!isRecord(item) || typeof item.id !== 'string' || !item.id.trim()) return null
+      return { id: item.id.trim(), enabled: item.enabled !== false }
+    })
+    .filter((item): item is { id: string; enabled: boolean } => Boolean(item))
+    .filter((item, index, list) => list.findIndex((candidate) => candidate.id === item.id) === index)
+  return models.length ? models : undefined
+}
+
 function normalizeRequestMethod(value: unknown, fallback: CustomProviderRequestMethod = 'POST'): CustomProviderRequestMethod {
   return value === 'GET' || value === 'POST' ? value : fallback
 }
@@ -363,6 +376,7 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
       responseFormatB64Json: profile.responseFormatB64Json,
       streamImages: profile.streamImages,
       streamPartialImages: profile.streamPartialImages,
+      models: profile.models,
     },
   }
   const savedDraft = providerDrafts[provider]
@@ -380,6 +394,7 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
       responseFormatB64Json: savedDraft?.responseFormatB64Json,
       streamImages: false,
       streamPartialImages: savedDraft?.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES,
+      models: savedDraft?.models,
       providerDrafts,
     }
   }
@@ -398,6 +413,7 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
       responseFormatB64Json: savedDraft?.responseFormatB64Json,
       streamImages: false,
       streamPartialImages: savedDraft?.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES,
+      models: savedDraft?.models,
       providerDrafts,
     }
   }
@@ -422,6 +438,7 @@ export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvi
     responseFormatB64Json: savedDraft?.responseFormatB64Json,
     streamImages: nextStreamImages,
     streamPartialImages: nextStreamPartialImages,
+    models: savedDraft?.models,
     providerDrafts,
   }
 }
@@ -447,6 +464,7 @@ function normalizeProviderDraft(input: unknown, provider: ApiProvider, customPro
     responseFormatB64Json: input.responseFormatB64Json === true ? true : undefined,
     streamImages: typeof input.streamImages === 'boolean' ? input.streamImages : fallback.streamImages,
     streamPartialImages: normalizeStreamPartialImages(input.streamPartialImages, fallback.streamPartialImages),
+    models: normalizeModels(input.models),
   }
 }
 
@@ -471,6 +489,7 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
   const streamImages = provider === 'openai'
     ? typeof record.streamImages === 'boolean' ? record.streamImages : defaults.streamImages
     : false
+  const models = normalizeModels(record.models)
 
   return {
     ...defaults,
@@ -488,6 +507,7 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     responseFormatB64Json: record.responseFormatB64Json === true ? true : undefined,
     streamImages,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, defaults.streamPartialImages),
+    models,
     providerDrafts: normalizeProviderDrafts(record.providerDrafts, customProviderIds),
   }
 }
@@ -565,6 +585,12 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     agentApiConfigMode,
     agentTextProfileId,
     agentImageProfileId,
+    generationProfileId: typeof record.generationProfileId === 'string' && profiles.some((p) => p.id === record.generationProfileId)
+      ? record.generationProfileId
+      : active.id,
+    generationModel: typeof record.generationModel === 'string' && record.generationModel.trim()
+      ? record.generationModel.trim()
+      : active.model,
     profiles,
     activeProfileId,
   }
@@ -677,6 +703,20 @@ export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): A
     streamImages: profile.provider === 'openai' && typeof record.streamImages === 'boolean' ? record.streamImages : profile.streamImages,
     streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, profile.streamPartialImages),
   }
+}
+
+export function getGenerationApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile {
+  const normalized = normalizeSettings(settings)
+  const selectedProfile = normalized.profiles.find((item) => item.id === normalized.generationProfileId)
+    ?? getActiveApiProfile(normalized)
+  const profile = selectedProfile.id === normalized.activeProfileId
+    ? getActiveApiProfile(settings)
+    : selectedProfile
+  const model = normalized.generationModel?.trim()
+  const enabledModelIds = profile.models?.filter((item) => item.enabled).map((item) => item.id)
+  if (model && (!enabledModelIds || enabledModelIds.includes(model))) return { ...profile, model }
+  if (enabledModelIds?.length) return { ...profile, model: enabledModelIds[0] }
+  return profile
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {

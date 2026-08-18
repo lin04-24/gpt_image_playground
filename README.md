@@ -2,6 +2,19 @@
 
 # 🎨 GPT Image Playground
 
+## 与原版的不同
+
+本仓库基于原版继续开发，当前 `v0.1.0` 主要增加：
+
+- 设置中心：可填写自定义 API URL 和 API Key，支持保存多个服务商配置。
+- 模型管理：填写 API 后可拉取模型列表，并单独启用或禁用模型。
+- 生图前选择：可在生图入口直接选择服务商和模型，不必切换设置页的当前配置。
+- 单用户登录：公网部署时使用唯一访问令牌作为登录口令，未通过验证前不会加载工作区数据。
+- 云端同步：登录后可在设备之间同步任务、图片、对话、配置和模型清单。
+- 移动端适配：登录页、设置页和生图入口适配手机屏幕。
+
+提交时不会包含任何 `.env`、API Key、登录令牌、数据库、图片缓存或本地部署数据。
+
 [![GitHub Repo stars](https://img.shields.io/github/stars/CookSleep/gpt_image_playground?style=flat-square&color=eab308)](https://github.com/CookSleep/gpt_image_playground/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/CookSleep/gpt_image_playground?style=flat-square&color=3b82f6)](https://github.com/CookSleep/gpt_image_playground/network/members)
 [![License](https://img.shields.io/badge/license-MIT-10b981?style=flat-square)](https://github.com/CookSleep/gpt_image_playground/blob/main/LICENSE)
@@ -181,6 +194,20 @@
 ## 🚀 部署与使用
 
 支持多种部署与开发方式。无论使用哪种方式，你都可以预设默认的 API 节点。
+
+### ☁️ 单用户云端同步部署
+
+如果需要让生成图片、参考图、任务历史、自定义模型和参数在多个设备之间自动互通，可使用仓库内置的同步服务：`deploy/cloud/docker-compose.yml`。它使用 Node 22 自带的 SQLite，元数据保存在 `deploy/cloud/data/sync.db`，图片保存在 `deploy/cloud/data/images/`，浏览器 IndexedDB 继续作为本地缓存。
+
+```bash
+cd deploy/cloud
+printf 'LOGIN_TOKEN=请替换为高强度随机令牌\nAPI_PROXY_URL=https://api.openai.com/v1\nCOOKIE_SECURE=true\n' > .env
+docker compose up -d --build
+```
+
+服务默认监听 `3000` 端口，并使用 `API_PROXY_URL` 提供同源模型 API 代理。生产环境应在 HTTPS 反向代理后使用，并保留 `COOKIE_SECURE=true`；仅在本机通过 HTTP 测试时才设置 `COOKIE_SECURE=false`。`LOGIN_TOKEN` 是单用户公网部署的唯一访问令牌。首次打开页面必须输入正确令牌，前端才会读取本地和云端数据；第一次登录会将两端数据合并，之后图片、参考图、任务、对话和完整配置（API Key、URL、模型及模型清单）都会自动增量同步。云端数据会保存在部署服务器上，请仅在自己可信且启用 HTTPS 的服务器上使用。已有部署可继续使用 `SYNC_PASSWORD`，但建议迁移至 `LOGIN_TOKEN`。
+
+服务器的 `deploy/cloud/data/` 是唯一需要备份的目录。不要把 `.env` 提交到 Git，也不要使用弱口令。
 
 <details>
 <summary><strong>▲ 方式一：Vercel 一键部署 (推荐)</strong></summary>

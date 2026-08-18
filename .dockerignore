@@ -1,6 +1,14 @@
+.git
+.env
+.env.*
 node_modules
 dist
-.git
+deploy/cloud/data
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/images
 .gitignore
 *.md
 Dockerfile

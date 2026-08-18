@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { normalizeBaseUrl } from '../lib/api'
+import { fetchProviderModels } from '../lib/modelApi'
 import { hasActiveDataOperations } from '../lib/dataOperations'
 import { isApiProxyAvailable, isApiProxyLocked, readClientDevProxyConfig } from '../lib/devProxy'
 import { useStore, exportData, importData, clearData, type SettingsTab } from '../store'
@@ -196,6 +197,8 @@ export default function SettingsModal() {
   const profileTouchDragRef = useRef<{ id: string, startX: number, startY: number, moved: boolean } | null>(null)
   const [copyImportUrlProfile, setCopyImportUrlProfile] = useState<ApiProfile | null>(null)
   const [copyImportUrlOptions, setCopyImportUrlOptions] = useState<CopyImportUrlOptions>(readCopyImportUrlOptions)
+  const [isFetchingModels, setIsFetchingModels] = useState(false)
+  const [modelFetchError, setModelFetchError] = useState<string | null>(null)
 
   const apiProxyConfig = readClientDevProxyConfig()
   const apiProxyAvailable = isApiProxyAvailable(apiProxyConfig)
@@ -400,7 +403,7 @@ export default function SettingsModal() {
         : (normalizedProfiles[0]?.id ?? fallbackProfile.id),
     })
     setDraft(normalizedDraft)
-    setSettings(normalizedDraft)
+    return normalizedDraft
   }
 
   const setZipDownloadRouteEnabled = (route: ZipDownloadRoute, enabled: boolean) => {
@@ -506,6 +509,49 @@ export default function SettingsModal() {
     commitSettings(nextDraft)
   }
 
+  const fetchModelsForActiveProfile = async () => {
+    if (activeProfile.provider === 'fal') {
+      setModelFetchError('fal.ai 暂不支持自动拉取模型列表')
+      return
+    }
+    setIsFetchingModels(true)
+    setModelFetchError(null)
+    try {
+      const ids = await fetchProviderModels(activeProfile)
+      const enabledById = new Map((activeProfile.models ?? []).map((model) => [model.id, model.enabled]))
+      const models = ids.map((id) => ({ id, enabled: enabledById.get(id) !== false }))
+      const selectedModel = models.find((model) => model.id === activeProfile.model && model.enabled)?.id
+        ?? models.find((model) => model.enabled)?.id
+        ?? models[0].id
+      commitSettings({
+        ...draft,
+        profiles: draft.profiles.map((profile) => profile.id === activeProfile.id
+          ? { ...profile, models, model: selectedModel }
+          : profile),
+      })
+      showToast(`已拉取 ${models.length} 个模型`, 'success')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      setModelFetchError(message)
+      showToast(message, 'error')
+    } finally {
+      setIsFetchingModels(false)
+    }
+  }
+
+  const toggleModel = (id: string, enabled: boolean) => {
+    const models = (activeProfile.models ?? []).map((model) => model.id === id ? { ...model, enabled } : model)
+    const nextModel = activeProfile.model === id && !enabled
+      ? models.find((model) => model.enabled)?.id ?? activeProfile.model
+      : activeProfile.model
+    commitSettings({
+      ...draft,
+      profiles: draft.profiles.map((profile) => profile.id === activeProfile.id
+        ? { ...profile, models, model: nextModel }
+        : profile),
+    })
+  }
+
   const handleClose = () => {
     if (isExportingData || isImportingData) {
       showDataTransferBusyToast()
@@ -515,6 +561,10 @@ export default function SettingsModal() {
       setShowZipDownloadRouteManager(false)
       return
     }
+    setShowSettings(false)
+  }
+
+  const saveSettings = () => {
     const nextTimeout = Number(timeoutInput)
     const normalizedTimeout =
       timeoutInput.trim() === '' || Number.isNaN(nextTimeout)
@@ -523,7 +573,7 @@ export default function SettingsModal() {
     const normalizedAgentMaxToolRounds = agentMaxToolRoundsInput.trim() === ''
       ? DEFAULT_AGENT_MAX_TOOL_ROUNDS
       : normalizeAgentMaxToolRounds(agentMaxToolRoundsInput, draft.agentMaxToolRounds)
-    const nextDraft = {
+    const savedSettings = commitSettings({
       ...draft,
       agentMaxToolRounds: normalizedAgentMaxToolRounds,
       profiles: activeProviderIsOpenAICompatible
@@ -531,10 +581,11 @@ export default function SettingsModal() {
             profile.id === activeProfile.id ? { ...profile, timeout: normalizedTimeout } : profile,
           )
         : draft.profiles,
-    }
+    })
     setAgentMaxToolRoundsInput(String(normalizedAgentMaxToolRounds))
-    commitSettings(nextDraft)
+    setSettings(savedSettings)
     setShowSettings(false)
+    showToast('设置已保存', 'success')
   }
 
   const commitTimeout = useCallback(() => {
@@ -1020,8 +1071,7 @@ export default function SettingsModal() {
               ...mergedDraft,
               activeProfileId: importedProfile.id,
             })
-        setDraft(nextDraft)
-        setSettings(nextDraft)
+        commitSettings(nextDraft)
         setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
         setShowCustomProviderImport(false)
         setEditingCustomProviderId(null)
@@ -1079,6 +1129,14 @@ export default function SettingsModal() {
           </h3>
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-400 dark:text-gray-500 font-mono select-none">v{__APP_VERSION__}</span>
+            <button
+              type="button"
+              onClick={saveSettings}
+              disabled={isExportingData || isImportingData}
+              className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              保存设置
+            </button>
             <button
               onClick={handleClose}
               className="rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.06] dark:hover:text-gray-200"
@@ -1499,9 +1557,17 @@ export default function SettingsModal() {
 
               {/* 7. 模型 ID（紧跟接口选择） */}
               <label className="block">
-                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">
-                  模型 ID
-                </span>
+                <div className="mb-1.5 flex items-center justify-between gap-3">
+                  <span className="block text-sm text-gray-600 dark:text-gray-300">模型 ID</span>
+                  <button
+                    type="button"
+                    onClick={() => void fetchModelsForActiveProfile()}
+                    disabled={isFetchingModels || activeProfile.provider === 'fal'}
+                    className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-300 dark:hover:bg-white/[0.06]"
+                  >
+                    {isFetchingModels ? '拉取中...' : '拉取模型'}
+                  </button>
+                </div>
                 <input
                   value={activeProfile.model}
                   onChange={(e) => updateActiveProfile({ model: e.target.value })}
@@ -1525,6 +1591,27 @@ export default function SettingsModal() {
                   )}
                 </div>
               </label>
+
+              {(activeProfile.models?.length ?? 0) > 0 && (
+                <div className="block">
+                  <div className="mb-1.5 text-sm text-gray-600 dark:text-gray-300">可用模型</div>
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-gray-200/70 bg-white/50 p-2 custom-scrollbar dark:border-white/[0.08] dark:bg-white/[0.03]">
+                    {activeProfile.models?.map((model) => (
+                      <label key={model.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-100/70 dark:text-gray-300 dark:hover:bg-white/[0.06]">
+                        <input
+                          type="checkbox"
+                          checked={model.enabled}
+                          onChange={(e) => toggleModel(model.id, e.target.checked)}
+                          className="h-3.5 w-3.5 accent-blue-500"
+                        />
+                        <span className="min-w-0 truncate">{model.id}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">仅启用的模型会显示在生图入口的配置选择中。</div>
+                </div>
+              )}
+              {modelFetchError && <div className="text-xs text-red-500">{modelFetchError}</div>}
 
               {(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' && activeProfile.provider === 'openai' && (
                 <div className="block">
@@ -1663,7 +1750,7 @@ export default function SettingsModal() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                   </svg>
                   <div className="text-[13px] leading-relaxed text-gray-500 dark:text-gray-400">
-                    所有的配置、任务和生成的图片均仅保存在您的浏览器本地（除非您使用的服务商存储了它们）。如果您需要清理浏览器站点数据、重置浏览器或使用其他设备，请先导出备份。
+                    未启用单用户云端同步部署时，所有配置、任务和生成图片仅保存在当前浏览器。请在清理站点数据、重置浏览器或切换设备前导出备份；启用云端同步后，图片、任务和完整配置会自动同步至工作区服务器。
                   </div>
                 </div>
 

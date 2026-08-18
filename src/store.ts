@@ -19,7 +19,7 @@ import type {
   StoredImageThumbnail,
 } from './types'
 import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_PARAMS } from './types'
-import { DEFAULT_SETTINGS, getActiveApiProfile, getAgentImageApiProfile, getAgentTextApiProfile, getCustomProviderDefinition, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
+import { DEFAULT_SETTINGS, getActiveApiProfile, getAgentImageApiProfile, getAgentTextApiProfile, getCustomProviderDefinition, getGenerationApiProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
 import {
@@ -942,6 +942,7 @@ export const useStore = create<AppState>()(
     {
       name: 'gpt-image-playground',
       version: 2,
+      skipHydration: true,
       migrate: migratePersistedState,
       partialize: getPersistedState,
       merge: mergePersistedState,
@@ -1572,7 +1573,7 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
     useStore.getState()
 
   const normalizedSettings = normalizeSettings(settings)
-  let activeProfile = getActiveApiProfile(settings)
+  let activeProfile = getGenerationApiProfile(settings)
   let requestSettings = createSettingsForApiProfile(normalizedSettings, activeProfile)
   if (normalizedSettings.reuseTaskApiProfileTemporarily && (reusedTaskApiProfileId || reusedTaskApiProfileMissing)) {
     const reusedProfile = getReusedTaskApiProfile(normalizedSettings, reusedTaskApiProfileId)
@@ -1661,6 +1662,7 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
   const taskId = genId()
   const task: TaskRecord = {
     id: taskId,
+    updatedAt: Date.now(),
     prompt: prompt.trim(),
     params: taskParams,
     apiProvider: activeProfile.provider,
@@ -3451,7 +3453,9 @@ async function executeTask(taskId: string) {
     })
     return
   }
-  const activeProfile = taskProfile ?? getActiveApiProfile(settings)
+  const activeProfile = taskProfile
+    ? { ...taskProfile, model: task.apiModel || taskProfile.model }
+    : getActiveApiProfile(settings)
   const requestSettings = createSettingsForApiProfile(settings, activeProfile)
   const taskProvider = task.apiProvider ?? activeProfile.provider
   let falRequestInfo: { requestId: string; endpoint: string } | null = task.falRequestId && task.falEndpoint
@@ -3647,7 +3651,7 @@ async function executeTask(taskId: string) {
 export function updateTaskInStore(taskId: string, patch: Partial<TaskRecord>) {
   const { tasks, setTasks, defaultFavoriteCollectionId } = useStore.getState()
   const updated = tasks.map((t) =>
-    t.id === taskId ? { ...t, ...normalizeFavoritePatch(t, patch, defaultFavoriteCollectionId) } : t,
+    t.id === taskId ? { ...t, ...normalizeFavoritePatch(t, patch, defaultFavoriteCollectionId), updatedAt: Date.now() } : t,
   )
   const task = updated.find((t) => t.id === taskId)
   setTasks(updated)
@@ -3747,8 +3751,12 @@ export async function deleteFavoriteCollection(collectionId: string, deleteTasks
 /** 重试失败的任务：创建新任务并执行 */
 export async function retryTask(task: TaskRecord) {
   const { settings } = useStore.getState()
-  const activeProfile = getActiveApiProfile(settings)
-  const normalizedParams = normalizeParamsForSettings(task.params, settings, { hasInputImages: task.inputImageIds.length > 0 })
+  const selectedProfile = getGenerationApiProfile(settings)
+  const activeProfile = task.apiProfileId
+    ? { ...getTaskApiProfile(settings, task) ?? selectedProfile, model: task.apiModel || selectedProfile.model }
+    : selectedProfile
+  const requestSettings = createSettingsForApiProfile(settings, activeProfile)
+  const normalizedParams = normalizeParamsForSettings(task.params, requestSettings, { hasInputImages: task.inputImageIds.length > 0 })
   const shouldUseTransparentOutput = normalizedParams.output_format === 'png' && normalizedParams.transparent_output
   const taskParams = shouldUseTransparentOutput
     ? getTransparentRequestParams(normalizedParams)
@@ -4460,4 +4468,3 @@ export async function addImageFromUrl(src: string): Promise<void> {
   cacheImage(id, dataUrl)
   useStore.getState().addInputImage({ id, dataUrl })
 }
-

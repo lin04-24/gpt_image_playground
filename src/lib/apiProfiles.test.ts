@@ -8,6 +8,7 @@ import {
   createDefaultOpenAIProfile,
   createDefaultFalProfile,
   getActiveApiProfile,
+  getGenerationApiProfile,
   findEquivalentApiProfile,
   importCustomProviderDefinitionFromJson,
   importCustomProviderSettingsFromJson,
@@ -38,6 +39,64 @@ describe('validateApiProfile', () => {
       apiKey: 'test-key',
       apiProxy: true,
     }))).toBe('缺少 API URL')
+  })
+})
+
+describe('generation profile', () => {
+  it('uses the model selected for generation instead of the profile currently edited in settings', () => {
+    const settings = normalizeSettings({
+      activeProfileId: 'settings-profile',
+      generationProfileId: 'generation-profile',
+      generationModel: 'image-model-b',
+      profiles: [
+        {
+          id: 'settings-profile',
+          name: '设置配置',
+          provider: 'openai',
+          baseUrl: 'https://settings.example.com/v1',
+          apiKey: 'settings-key',
+          model: 'image-model-a',
+        },
+        {
+          id: 'generation-profile',
+          name: '生图配置',
+          provider: 'openai',
+          baseUrl: 'https://generation.example.com/v1',
+          apiKey: 'generation-key',
+          model: 'image-model-a',
+          models: [
+            { id: 'image-model-a', enabled: true },
+            { id: 'image-model-b', enabled: true },
+          ],
+        },
+      ],
+    })
+
+    expect(getGenerationApiProfile(settings)).toMatchObject({
+      id: 'generation-profile',
+      apiKey: 'generation-key',
+      model: 'image-model-b',
+    })
+  })
+
+  it('falls back to an enabled model when the saved model was disabled', () => {
+    const settings = normalizeSettings({
+      generationModel: 'disabled-model',
+      profiles: [{
+        id: 'profile',
+        name: '配置',
+        provider: 'openai',
+        baseUrl: 'https://api.example.com/v1',
+        apiKey: 'test-key',
+        model: 'disabled-model',
+        models: [
+          { id: 'disabled-model', enabled: false },
+          { id: 'enabled-model', enabled: true },
+        ],
+      }],
+    })
+
+    expect(getGenerationApiProfile(settings).model).toBe('enabled-model')
   })
 })
 

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { deleteFavoriteCollection, useStore, submitTask, submitAgentMessage, stopAgentResponse, addImageFromFile, removeMultipleTasks, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { getActiveAgentRounds } from '../lib/agentConversationState'
-import { getActiveApiProfile, getAgentImageApiProfile, normalizeSettings } from '../lib/apiProfiles'
+import { getActiveApiProfile, getAgentImageApiProfile, getApiProviderLabel, getGenerationApiProfile, normalizeSettings } from '../lib/apiProfiles'
 import { ensureImageCached, getCachedImage } from '../lib/imageCache'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, insertTextMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
@@ -21,6 +21,7 @@ import ButtonTooltip from './input/buttonTooltip'
 import DragUploadOverlay from './input/dragUploadOverlay'
 import InputBatchBars from './input/inputBatchBars'
 import InputParamsPanel from './input/inputParamsPanel'
+import Select from './Select'
 
 /** API 支持的最大参考图数量 */
 const API_MAX_IMAGES = 16
@@ -93,6 +94,7 @@ export default function InputBar() {
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
   const settings = useStore((s) => s.settings)
+  const setSettings = useStore((s) => s.setSettings)
   const reusedTaskApiProfileId = useStore((s) => s.reusedTaskApiProfileId)
   const setShowSettings = useStore((s) => s.setShowSettings)
   const setLightboxImageId = useStore((s) => s.setLightboxImageId)
@@ -413,13 +415,23 @@ export default function InputBar() {
   const currentActiveProfile = useMemo(() => (
     appMode === 'agent'
       ? getAgentImageApiProfile(settings) ?? settingsActiveProfile
-      : settingsActiveProfile
+      : getGenerationApiProfile(settings)
   ), [appMode, settings, settingsActiveProfile])
   const activeProfile = useMemo(() => (
     appMode !== 'agent' && settings.reuseTaskApiProfileTemporarily && reusedTaskApiProfileId
       ? settings.profiles.find((profile) => profile.id === reusedTaskApiProfileId) ?? currentActiveProfile
       : currentActiveProfile
   ), [appMode, currentActiveProfile, reusedTaskApiProfileId, settings])
+  const generationChoices = useMemo(() => settings.profiles.flatMap((profile) => {
+    const models = profile.models?.filter((model) => model.enabled).map((model) => model.id) ?? [profile.model]
+    return models.map((model) => ({
+      label: `${profile.name} · ${getApiProviderLabel(settings, profile.provider)} · ${model}`,
+      value: JSON.stringify([profile.id, model]),
+      profileId: profile.id,
+      model,
+    }))
+  }), [settings])
+  const selectedGenerationChoice = generationChoices.find((choice) => choice.profileId === activeProfile.id && choice.model === activeProfile.model)
   const activeAgentConversation = appMode === 'agent'
     ? agentConversations.find((conversation) => conversation.id === activeAgentConversationId) ?? null
     : null
@@ -1552,6 +1564,25 @@ export default function InputBar() {
     />
   )
 
+  const renderGenerationSelector = () => appMode === 'gallery' && generationChoices.length > 0 ? (
+    <div className="mb-3 flex items-center gap-2">
+      <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">生图配置</span>
+      <Select
+        value={selectedGenerationChoice?.value ?? generationChoices[0].value}
+        onChange={(value) => {
+          try {
+            const [profileId, model] = JSON.parse(String(value)) as [string, string]
+            setSettings({ generationProfileId: profileId, generationModel: model })
+          } catch {
+            return
+          }
+        }}
+        options={generationChoices.map(({ label, value }) => ({ label, value }))}
+        className="min-w-0 flex-1 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-xs text-gray-700 outline-none dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200"
+      />
+    </div>
+  ) : null
+
   const showFavoriteCollectionBatchBar = inCollectionOverview && selectedFavoriteCollectionIds.length > 0
   const showTaskBatchBar = !showFavoriteCollectionBatchBar && selectedTaskIds.length > 0
 
@@ -1758,6 +1789,7 @@ export default function InputBar() {
 
           {/* 参数 + 按钮 */}
           <div className="mt-3">
+            {renderGenerationSelector()}
             {/* 桌面端布局 */}
             <div className="hidden sm:flex items-end justify-between gap-3">
               {renderParams('grid-cols-6')}

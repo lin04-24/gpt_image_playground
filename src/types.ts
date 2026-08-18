@@ -83,7 +83,9 @@ export interface ApiProfile {
   responseFormatB64Json?: boolean
   streamImages?: boolean
   streamPartialImages?: number
-  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'reasoningEffort' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json' | 'streamImages' | 'streamPartialImages'>>>>
+  /** 服务商返回的模型清单；未拉取时为空，手动填写的 model 仍然有效 */
+  models?: Array<{ id: string; enabled: boolean }>
+  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'reasoningEffort' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json' | 'streamImages' | 'streamPartialImages' | 'models'>>>>
 }
 
 export interface AppSettings {
@@ -114,6 +116,9 @@ export interface AppSettings {
   agentApiConfigMode: AgentApiConfigMode
   agentTextProfileId?: string | null
   agentImageProfileId?: string | null
+  /** 生图入口当前选择的配置和模型，与设置页正在编辑的配置解耦 */
+  generationProfileId?: string | null
+  generationModel?: string | null
   profiles: ApiProfile[]
   activeProfileId: string
 }
@@ -169,6 +174,8 @@ export type TaskStatus = 'running' | 'done' | 'error'
 
 export interface TaskRecord {
   id: string
+  /** 本地修改时间，用于跨设备同步时解决同一任务的冲突 */
+  updatedAt?: number
   prompt: string
   params: TaskParams
   /** 生成时使用的 Provider 类型 */
