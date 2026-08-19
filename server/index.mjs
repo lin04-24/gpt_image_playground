@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { extname, join, normalize, resolve } from 'node:path'
@@ -139,6 +139,16 @@ function writeSnapshot(input) {
   const previous = getSnapshot()
   const revision = previous.revision + 1
   const updatedAt = Date.now()
+  const previousClearedAt = Number(previous.state?.cloudDataClearedAt) || 0
+  const nextClearedAt = Number(input.state?.cloudDataClearedAt) || 0
+  if (nextClearedAt > previousClearedAt) {
+    const images = db.prepare('SELECT id FROM cloud_images').all()
+    for (const image of images) {
+      const path = imagePath(image.id)
+      if (path) rmSync(path, { force: true })
+    }
+    db.prepare('DELETE FROM cloud_images').run()
+  }
   const data = JSON.stringify({
     state: input.state ?? null,
     tasks: Array.isArray(input.tasks) ? input.tasks : [],

@@ -24,14 +24,16 @@ export interface PersistedAppState {
   supportPromptDismissed: boolean
   supportPromptOpen: boolean
   supportPromptSkippedForImportedData: boolean
+  cloudDataClearedAt: number
 }
 
-type PersistedStateSource = Omit<PersistedAppState, 'prompt' | 'inputImages' | 'agentConversations'> & {
+type PersistedStateSource = Omit<PersistedAppState, 'prompt' | 'inputImages' | 'agentConversations' | 'cloudDataClearedAt'> & {
   prompt: string
   inputImages: InputImage[]
   maskDraft: MaskDraft | null
   maskEditorImageId: string | null
   agentConversations: AgentConversation[]
+  cloudDataClearedAt?: number
 }
 
 type PersistedStateFallback = Pick<
@@ -111,6 +113,7 @@ export function createPersistedState(state: PersistedStateSource, includeLegacyA
     supportPromptDismissed: state.supportPromptDismissed,
     supportPromptOpen: state.supportPromptOpen,
     supportPromptSkippedForImportedData: state.supportPromptSkippedForImportedData,
+    cloudDataClearedAt: state.cloudDataClearedAt ?? 0,
   }
 }
 
@@ -193,6 +196,9 @@ export function normalizePersistedState(
       supportPromptDismissed: Boolean(persistedState.supportPromptDismissed),
       supportPromptOpen: Boolean(persistedState.supportPromptOpen),
       supportPromptSkippedForImportedData: Boolean(persistedState.supportPromptSkippedForImportedData),
+      cloudDataClearedAt: typeof persistedState.cloudDataClearedAt === 'number' && Number.isFinite(persistedState.cloudDataClearedAt)
+        ? persistedState.cloudDataClearedAt
+        : 0,
       prompt: restoredAgentDraft ? restoredAgentDraft.prompt : galleryInputDraft?.prompt ?? '',
       inputImages: restoredAgentDraft ? restoredAgentDraft.inputImages : galleryInputDraft?.inputImages ?? [],
       maskDraft: restoredAgentDraft ? restoredAgentDraft.maskDraft : galleryInputDraft?.maskDraft ?? null,

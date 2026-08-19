@@ -1,6 +1,6 @@
 import type { AgentConversation, AppSettings, StoredImage, TaskRecord } from '../types'
 import { blobToDataUrl } from './dataUrl'
-import { deleteTask, getAllAgentConversations, getAllImageIds, getAllTasks, getImage, putImage, putTask, replaceAgentConversations } from './db'
+import { clearImages, deleteTask, getAllAgentConversations, getAllImageIds, getAllTasks, getImage, putImage, putTask, replaceAgentConversations } from './db'
 import type { PersistedAppState } from './persistedState'
 import { getPersistedState, useStore } from '../store'
 
@@ -202,6 +202,9 @@ async function applyRemoteSnapshot(remote: CloudSnapshot) {
   const tasks = mergeRecords(localTasks, remote.tasks, remote.deletedTaskIds, getRecordTime)
   const conversations = mergeRecords(localConversations, remote.agentConversations, remote.deletedConversationIds, (conversation) => conversation.updatedAt)
 
+  if ((remote.state?.cloudDataClearedAt ?? 0) > localState.cloudDataClearedAt) {
+    await clearImages()
+  }
   await downloadMissingImages(remote.images)
   const taskIds = new Set(tasks.map((task) => task.id))
   await Promise.all(localTasks.filter((task) => !taskIds.has(task.id)).map((task) => deleteTask(task.id)))
@@ -217,6 +220,7 @@ async function applyRemoteSnapshot(remote: CloudSnapshot) {
       defaultFavoriteCollectionId: remote.state.defaultFavoriteCollectionId,
       agentInputDrafts: remote.state.agentInputDrafts,
       galleryInputDraft: remote.state.galleryInputDraft,
+      cloudDataClearedAt: remote.state.cloudDataClearedAt,
     })
   }
   useStore.setState({

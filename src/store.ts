@@ -378,6 +378,7 @@ interface AppState {
   supportPromptOpen: boolean
   supportPromptDismissed: boolean
   supportPromptSkippedForImportedData: boolean
+  cloudDataClearedAt: number
   setSupportPromptOpen: (v: boolean) => void
   dismissSupportPrompt: () => void
 
@@ -918,6 +919,7 @@ export const useStore = create<AppState>()(
       supportPromptOpen: false,
       supportPromptDismissed: false,
       supportPromptSkippedForImportedData: false,
+      cloudDataClearedAt: 0,
       setSupportPromptOpen: (supportPromptOpen) => set({ supportPromptOpen }),
       dismissSupportPrompt: () => set({ supportPromptOpen: false, supportPromptDismissed: true }),
 
@@ -4147,6 +4149,7 @@ export async function clearData(options: ClearOptions = { clearConfig: true, cle
     })
     clearInputImages()
     clearMaskDraft()
+    useStore.setState({ cloudDataClearedAt: Date.now() })
   }
 
   if (options.clearConfig) {
