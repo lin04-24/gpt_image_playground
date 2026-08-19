@@ -3,7 +3,7 @@ import { useStore, reuseConfig, editOutputs, removeTask, showCodexCliPrompt, get
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { useTooltip } from '../hooks/useTooltip'
-import { ensureImageCached, getCachedImage } from '../lib/imageCache'
+import { ensureImageCached, ensureImageThumbnailCached, getCachedImage } from '../lib/imageCache'
 import { formatImageRatio } from '../lib/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyImageSourceToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
@@ -180,35 +180,38 @@ export default function DetailModal() {
   const currentOriginalOutputImageId = currentOutputImageIndex >= 0 ? task?.transparentOriginalImages?.[currentOutputImageIndex] || '' : ''
   const currentOutputPreviewSrc = currentOutputImageId ? outputPreviewSrcs[currentOutputImageId] || '' : ''
 
+  // 详情只加载当前输出图的原图，切换输出时再按需读取下一张。
+  // 原图读取完成前先展示缩略图，避免打开详情时出现空白。
   useEffect(() => {
-    const outputImageIds = task?.outputImages ?? []
-    if (outputImageIds.length === 0) {
+    const imageId = currentOutputImageId
+    if (!imageId) {
       setOutputPreviewSrcs({})
       return
     }
 
     let cancelled = false
-    const setOutputImage = (imageId: string, dataUrl: string) => {
-      if (!cancelled) setOutputPreviewSrcs((prev) => ({ ...prev, [imageId]: dataUrl }))
+    const cached = getCachedImage(imageId)
+    setOutputPreviewSrcs(cached ? { [imageId]: cached } : {})
+
+    if (!cached) {
+      ensureImageThumbnailCached(imageId)
+        .then((thumbnail) => {
+          if (cancelled || !thumbnail) return
+          setOutputPreviewSrcs((prev) => prev[imageId] ? prev : { ...prev, [imageId]: thumbnail.dataUrl })
+        })
+        .catch(() => {})
     }
 
-    for (const imageId of outputImageIds) {
-      const cached = getCachedImage(imageId)
-      if (cached) {
-        setOutputImage(imageId, cached)
-      } else {
-        ensureImageCached(imageId)
-          .then((dataUrl) => {
-            if (dataUrl) setOutputImage(imageId, dataUrl)
-          })
-          .catch(() => {})
-      }
-    }
+    ensureImageCached(imageId)
+      .then((dataUrl) => {
+        if (!cancelled && dataUrl) setOutputPreviewSrcs((prev) => ({ ...prev, [imageId]: dataUrl }))
+      })
+      .catch(() => {})
 
     return () => {
       cancelled = true
     }
-  }, [task?.outputImages])
+  }, [currentOutputImageId])
 
   useEffect(() => {
     let cancelled = false
