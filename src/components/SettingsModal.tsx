@@ -157,6 +157,9 @@ export default function SettingsModal() {
   const settingsScrollBoundaryRef = useRef<HTMLDivElement>(null)
   const customProviderScrollBoundaryRef = useRef<HTMLDivElement>(null)
   const zipDownloadRouteScrollBoundaryRef = useRef<HTMLDivElement>(null)
+  const initialDraftRef = useRef<AppSettings | null>(null)
+  const initialTimeoutInputRef = useRef('')
+  const initialAgentMaxToolRoundsInputRef = useRef('')
   
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
@@ -275,6 +278,7 @@ export default function SettingsModal() {
   useEffect(() => {
     if (!showSettings) {
       wasSettingsOpenRef.current = false
+      initialDraftRef.current = null
       return
     }
     if (wasSettingsOpenRef.current) return
@@ -294,8 +298,13 @@ export default function SettingsModal() {
       })),
     })
     setDraft(nextDraft)
-    setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-    setAgentMaxToolRoundsInput(String(nextDraft.agentMaxToolRounds))
+    const nextTimeoutInput = String(getActiveApiProfile(nextDraft).timeout)
+    const nextAgentMaxToolRoundsInput = String(nextDraft.agentMaxToolRounds)
+    setTimeoutInput(nextTimeoutInput)
+    setAgentMaxToolRoundsInput(nextAgentMaxToolRoundsInput)
+    initialDraftRef.current = nextDraft
+    initialTimeoutInputRef.current = nextTimeoutInput
+    initialAgentMaxToolRoundsInputRef.current = nextAgentMaxToolRoundsInput
   }, [apiProxyAvailable, apiProxyLocked, showSettings, settings, reusedTaskApiProfileId])
 
   useEffect(() => {
@@ -405,6 +414,12 @@ export default function SettingsModal() {
     setDraft(normalizedDraft)
     return normalizedDraft
   }
+
+  const hasUnsavedChanges = initialDraftRef.current != null && (
+    JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current) ||
+    timeoutInput !== initialTimeoutInputRef.current ||
+    agentMaxToolRoundsInput !== initialAgentMaxToolRoundsInputRef.current
+  )
 
   const setZipDownloadRouteEnabled = (route: ZipDownloadRoute, enabled: boolean) => {
     const nextRoutes = enabled
@@ -1132,7 +1147,7 @@ export default function SettingsModal() {
             <button
               type="button"
               onClick={saveSettings}
-              disabled={isExportingData || isImportingData}
+              disabled={!hasUnsavedChanges || isExportingData || isImportingData}
               className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               保存设置
