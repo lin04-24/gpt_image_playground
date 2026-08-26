@@ -1,8 +1,10 @@
+import type { StoredImage } from '../types'
 import {
   CURRENT_THUMBNAIL_VERSION,
   getImage,
   getImageThumbnail,
   getStoredFreshImageThumbnail,
+  putImage,
 } from './db'
 
 type ImageThumbnail = {
@@ -13,6 +15,7 @@ type ImageThumbnail = {
 }
 
 const imageCache = new Map<string, string>()
+const imageLoadPromises = new Map<string, Promise<string | undefined>>()
 const thumbnailCache = new Map<string, ImageThumbnail>()
 const thumbnailBackfillIds = new Map<string, 'visible' | 'background'>()
 const thumbnailBackfillRunningIds = new Set<string>()
@@ -22,6 +25,14 @@ let thumbnailBackfillScheduled = false
 const MAX_IMAGE_CACHE_ENTRIES = 8
 const MAX_THUMBNAIL_CACHE_ENTRIES = 80
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4
+
+export type RemoteImageLoader = (id: string) => Promise<StoredImage | string | undefined>
+
+let remoteImageLoader: RemoteImageLoader | undefined
+
+export function setRemoteImageLoader(loader: RemoteImageLoader | undefined) {
+  remoteImageLoader = loader
+}
 
 export function getCachedImage(id: string): string | undefined {
   const dataUrl = imageCache.get(id)
@@ -85,12 +96,39 @@ export function clearImageCaches() {
 export async function ensureImageCached(id: string): Promise<string | undefined> {
   const cached = getCachedImage(id)
   if (cached) return cached
-  const rec = await getImage(id)
-  if (rec) {
-    cacheImage(id, rec.dataUrl)
-    return rec.dataUrl
+
+  const existingLoad = imageLoadPromises.get(id)
+  if (existingLoad) return existingLoad
+
+  const load = (async () => {
+    const rec = await getImage(id)
+    if (rec) {
+      cacheImage(id, rec.dataUrl)
+      return rec.dataUrl
+    }
+
+    if (!remoteImageLoader) return undefined
+
+    let remote: StoredImage | string | undefined
+    try {
+      remote = await remoteImageLoader(id)
+    } catch {
+      return undefined
+    }
+    if (!remote) return undefined
+
+    const image = typeof remote === 'string' ? { id, dataUrl: remote } : remote
+    await putImage(image)
+    cacheImage(id, image.dataUrl)
+    return image.dataUrl
+  })()
+
+  imageLoadPromises.set(id, load)
+  try {
+    return await load
+  } finally {
+    if (imageLoadPromises.get(id) === load) imageLoadPromises.delete(id)
   }
-  return undefined
 }
 
 export async function ensureImageThumbnailCached(id: string): Promise<ImageThumbnail | undefined> {

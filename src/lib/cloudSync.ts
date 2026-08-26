@@ -1,12 +1,14 @@
 import type { AgentConversation, AppSettings, StoredImage, TaskRecord } from '../types'
 import { blobToDataUrl } from './dataUrl'
-import { clearImages, deleteTask, getAllAgentConversations, getAllImageIds, getAllTasks, getImage, putImage, putTask, replaceAgentConversations } from './db'
+import { clearImages, CURRENT_THUMBNAIL_VERSION, deleteTask, getAllAgentConversations, getAllImageIds, getAllTasks, getImage, getImageThumbnail, getStoredFreshImageThumbnail, putImage, putImageThumbnail, putTask, replaceAgentConversations } from './db'
+import { setRemoteImageLoader } from './imageCache'
 import type { PersistedAppState } from './persistedState'
 import { getPersistedState, useStore } from '../store'
 
 interface CloudImage {
   id: string
   mimeType: string
+  thumbnailMimeType?: string
   createdAt?: number
   source?: StoredImage['source']
   width?: number
@@ -32,6 +34,7 @@ let syncing = false
 const TOMBSTONE_STORAGE_KEY = 'gpt-image-playground.cloud-tombstones'
 let knownTaskIds = new Set<string>()
 let knownConversationIds = new Set<string>()
+let cloudImages = new Map<string, CloudImage>()
 
 interface PendingTombstones {
   tasks: Record<string, number>
@@ -179,21 +182,51 @@ async function mergeRemoteWithLocalChanges(remote: CloudSnapshot): Promise<Cloud
   }
 }
 
-async function downloadMissingImages(images: CloudImage[]) {
-  for (const image of images) {
-    if (await getImage(image.id)) continue
-    const response = await request(`/cloud-api/images/${encodeURIComponent(image.id)}`)
-    if (!response.ok) continue
-    const dataUrl = await blobToDataUrl(await response.blob(), image.mimeType)
-    await putImage({
-      id: image.id,
-      dataUrl,
-      createdAt: image.createdAt,
-      source: image.source,
-      width: image.width,
-      height: image.height,
-    })
+async function downloadMissingThumbnails(images: CloudImage[]) {
+  const queue = images.filter((image) => image.thumbnailMimeType)
+  let next = 0
+  const worker = async () => {
+    while (next < queue.length) {
+      const image = queue[next++]
+      if (await getStoredFreshImageThumbnail(image.id)) continue
+      try {
+        const response = await request(`/cloud-api/images/${encodeURIComponent(image.id)}/thumbnail`)
+        if (!response.ok) continue
+        const dataUrl = await blobToDataUrl(await response.blob(), image.thumbnailMimeType)
+        await putImageThumbnail({
+          id: image.id,
+          thumbnailDataUrl: dataUrl,
+          width: image.width,
+          height: image.height,
+          thumbnailVersion: CURRENT_THUMBNAIL_VERSION,
+        })
+      } catch (error) {
+        console.warn('Cloud thumbnail download failed:', error)
+      }
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, () => worker()))
+}
+
+async function downloadMissingImages(images: CloudImage[]) {
+  const queue = images.filter((image) => !image.thumbnailMimeType)
+  let next = 0
+  const worker = async () => {
+    while (next < queue.length) {
+      const image = queue[next++]
+      try {
+        if (await getImage(image.id)) continue
+        const response = await request(`/cloud-api/images/${encodeURIComponent(image.id)}`)
+        if (!response.ok) continue
+        const dataUrl = await blobToDataUrl(await response.blob(), image.mimeType)
+        await putImage({ id: image.id, dataUrl, createdAt: image.createdAt, source: image.source, width: image.width, height: image.height })
+        await getImageThumbnail(image.id)
+      } catch (error) {
+        console.warn('Cloud image download failed:', error)
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(2, queue.length) }, () => worker()))
 }
 
 async function applyRemoteSnapshot(remote: CloudSnapshot) {
@@ -205,7 +238,7 @@ async function applyRemoteSnapshot(remote: CloudSnapshot) {
   if ((remote.state?.cloudDataClearedAt ?? 0) > localState.cloudDataClearedAt) {
     await clearImages()
   }
-  await downloadMissingImages(remote.images)
+  await downloadMissingThumbnails(remote.images)
   const taskIds = new Set(tasks.map((task) => task.id))
   await Promise.all(localTasks.filter((task) => !taskIds.has(task.id)).map((task) => deleteTask(task.id)))
   await Promise.all(tasks.map((task) => putTask(task)))
@@ -230,28 +263,43 @@ async function applyRemoteSnapshot(remote: CloudSnapshot) {
       ? localState.activeAgentConversationId
       : conversations[0]?.id ?? null,
   })
+  void downloadMissingImages(remote.images)
 }
 
 async function uploadMissingImages(remote: CloudSnapshot) {
-  const remoteIds = new Set(remote.images.map((image) => image.id))
+  const remoteImages = new Map(remote.images.map((image) => [image.id, image]))
   const imageIds = await getAllImageIds()
   for (const id of imageIds) {
-    if (remoteIds.has(id)) continue
     const image = await getImage(id)
     if (!image) continue
-    const blob = await (await fetch(image.dataUrl)).blob()
-    const response = await request(`/cloud-api/images/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': blob.type || 'application/octet-stream',
-        'X-Image-Created-At': String(image.createdAt ?? Date.now()),
-        'X-Image-Source': image.source ?? 'upload',
-        ...(image.width ? { 'X-Image-Width': String(image.width) } : {}),
-        ...(image.height ? { 'X-Image-Height': String(image.height) } : {}),
-      },
-      body: blob,
-    })
-    if (!response.ok) throw new Error('图片上传失败')
+    const remoteImage = remoteImages.get(id)
+    if (!remoteImage) {
+      const blob = await (await fetch(image.dataUrl)).blob()
+      const response = await request(`/cloud-api/images/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': blob.type || 'application/octet-stream',
+          'X-Image-Created-At': String(image.createdAt ?? Date.now()),
+          'X-Image-Source': image.source ?? 'upload',
+          ...(image.width ? { 'X-Image-Width': String(image.width) } : {}),
+          ...(image.height ? { 'X-Image-Height': String(image.height) } : {}),
+        },
+        body: blob,
+      })
+      if (!response.ok) throw new Error('图片上传失败')
+    }
+    if (!remoteImage?.thumbnailMimeType) {
+      const thumbnail = await getImageThumbnail(id)
+      if (thumbnail?.thumbnailDataUrl) {
+        const thumbnailBlob = await (await fetch(thumbnail.thumbnailDataUrl)).blob()
+        const response = await request(`/cloud-api/images/${encodeURIComponent(id)}/thumbnail`, {
+          method: 'PUT',
+          headers: { 'Content-Type': thumbnailBlob.type || 'image/webp' },
+          body: thumbnailBlob,
+        })
+        if (!response.ok) throw new Error('缩略图上传失败')
+      }
+    }
   }
 }
 
@@ -301,9 +349,11 @@ export async function synchronizeCloudData() {
   syncing = true
   try {
     const remote = await getSnapshot()
+    cloudImages = new Map(remote.images.map((image) => [image.id, image]))
     const merged = await mergeRemoteWithLocalChanges(remote)
     if (merged.revision > 0) await applyRemoteSnapshot(merged)
     latestSnapshot = await pushSnapshot(merged)
+    cloudImages = new Map(latestSnapshot.images.map((image) => [image.id, image]))
     const pending = readPendingTombstones()
     writePendingTombstones({
       tasks: Object.fromEntries(Object.entries(pending.tasks).filter(([id, deletedAt]) => (latestSnapshot!.deletedTaskIds[id] ?? 0) < deletedAt)),
@@ -346,6 +396,19 @@ export function startCloudSync() {
   knownTaskIds = new Set(state.tasks.map((task) => task.id))
   knownConversationIds = new Set(state.agentConversations.map((conversation) => conversation.id))
   unsubscribe = useStore.subscribe(trackCloudDeletions)
+  setRemoteImageLoader(async (id) => {
+    const image = cloudImages.get(id)
+    const response = await request(`/cloud-api/images/${encodeURIComponent(id)}`)
+    if (!response.ok) return undefined
+    return {
+      id,
+      dataUrl: await blobToDataUrl(await response.blob(), image?.mimeType || response.headers.get('content-type') || undefined),
+      createdAt: image?.createdAt,
+      source: image?.source,
+      width: image?.width,
+      height: image?.height,
+    }
+  })
   window.addEventListener('online', schedulePush)
 }
 
@@ -354,5 +417,7 @@ export function stopCloudSync() {
   pushTimer = null
   unsubscribe?.()
   unsubscribe = null
+  cloudImages.clear()
+  setRemoteImageLoader(undefined)
   window.removeEventListener('online', schedulePush)
 }
