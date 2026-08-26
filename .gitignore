@@ -2,3 +2,14 @@ node_modules/
 dist/
 dev-proxy.config.json
 .wrangler/
+
+# 本地敏感配置与部署数据
+.env
+.env.*
+!.env.example
+!.env.*.example
+deploy/cloud/.env
+deploy/cloud/data/
+*.db
+*.sqlite
+*.sqlite3
