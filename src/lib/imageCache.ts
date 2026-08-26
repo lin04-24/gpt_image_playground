@@ -1,10 +1,11 @@
-import type { StoredImage } from '../types'
+import type { StoredImage, StoredImageThumbnail } from '../types'
 import {
   CURRENT_THUMBNAIL_VERSION,
   getImage,
   getImageThumbnail,
   getStoredFreshImageThumbnail,
   putImage,
+  putImageThumbnail,
 } from './db'
 
 type ImageThumbnail = {
@@ -77,6 +78,26 @@ export function cacheThumbnail(id: string, thumbnail: ImageThumbnail) {
     if (oldestKey == null) break
     thumbnailCache.delete(oldestKey)
   }
+}
+
+export function publishImageThumbnail(thumbnail: StoredImageThumbnail) {
+  const value = {
+    dataUrl: thumbnail.thumbnailDataUrl,
+    width: thumbnail.width,
+    height: thumbnail.height,
+    thumbnailVersion: thumbnail.thumbnailVersion,
+  }
+  cacheThumbnail(thumbnail.id, value)
+  thumbnailSubscribers.get(thumbnail.id)?.forEach((callback) => callback({
+    dataUrl: value.dataUrl,
+    width: value.width,
+    height: value.height,
+  }))
+}
+
+export async function storeAndPublishImageThumbnail(thumbnail: StoredImageThumbnail) {
+  await putImageThumbnail(thumbnail)
+  publishImageThumbnail(thumbnail)
 }
 
 export function deleteImageCacheEntry(id: string) {
@@ -242,17 +263,13 @@ async function startThumbnailBackfill(id: string) {
 
     const thumbnail = await getImageThumbnail(id)
     if (thumbnail?.thumbnailDataUrl) {
-      cacheThumbnail(id, {
-        dataUrl: thumbnail.thumbnailDataUrl,
+      publishImageThumbnail({
+        id,
+        thumbnailDataUrl: thumbnail.thumbnailDataUrl,
         width: thumbnail.width,
         height: thumbnail.height,
         thumbnailVersion: thumbnail.thumbnailVersion,
       })
-      thumbnailSubscribers.get(id)?.forEach((callback) => callback({
-        dataUrl: thumbnail.thumbnailDataUrl,
-        width: thumbnail.width,
-        height: thumbnail.height,
-      }))
     }
   } catch {
     // 缩略图生成失败时保留占位图，后续仍可再次补全。

@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { extname, join, normalize, resolve } from 'node:path'
 import { Readable } from 'node:stream'
+import { getCloudSnapshotPage } from './cloudPagination.mjs'
 
 const port = Number(process.env.PORT || 3000)
 const dataDir = resolve(process.env.DATA_DIR || '/app/data')
@@ -262,6 +263,15 @@ async function handleApi(req, res, url) {
   if (!requireAuth(req, res)) return true
 
   if (url.pathname === '/cloud-api/snapshot' && req.method === 'GET') {
+    if (url.searchParams.has('mode')) {
+      const result = getCloudSnapshotPage(getSnapshot(), url.searchParams)
+      if (result.error) {
+        json(res, result.status, { error: result.error, ...(result.revision === undefined ? {} : { revision: result.revision }) })
+      } else {
+        json(res, 200, result.page)
+      }
+      return true
+    }
     json(res, 200, getSnapshot())
     return true
   }

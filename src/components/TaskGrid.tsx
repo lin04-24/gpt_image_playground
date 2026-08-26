@@ -33,7 +33,7 @@ export default function TaskGrid() {
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
   const filteredTasks = useMemo(() => {
-    const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt)
+    const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
     const q = searchQuery.trim().toLowerCase()
     
     return sorted.filter((t) => {

@@ -58,6 +58,10 @@ export function getAllTasks(): Promise<TaskRecord[]> {
   return dbTransaction(STORE_TASKS, 'readonly', (s) => s.getAll())
 }
 
+export function getTask(id: string): Promise<TaskRecord | undefined> {
+  return dbTransaction(STORE_TASKS, 'readonly', (s) => s.get(id))
+}
+
 export function putTask(task: TaskRecord): Promise<IDBValidKey> {
   return dbTransaction(STORE_TASKS, 'readwrite', (s) => s.put(task))
 }

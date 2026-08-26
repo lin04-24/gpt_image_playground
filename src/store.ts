@@ -1369,8 +1369,41 @@ async function recoverFalTask(taskId: string) {
   }
 }
 
+export async function cleanupUnreferencedImages(tasks?: TaskRecord[], isCurrent = () => true) {
+  const currentTasks = tasks ?? await getAllTasks()
+  const referencedIds = new Set<string>()
+  const state = useStore.getState()
+  for (const image of state.inputImages) referencedIds.add(image.id)
+  if (state.galleryInputDraft) {
+    for (const image of state.galleryInputDraft.inputImages) referencedIds.add(image.id)
+  }
+  for (const draft of Object.values(state.agentInputDrafts)) {
+    for (const image of draft.inputImages) referencedIds.add(image.id)
+  }
+  for (const conversation of state.agentConversations) {
+    for (const round of conversation.rounds) {
+      for (const id of round.inputImageIds) referencedIds.add(id)
+    }
+  }
+  for (const task of currentTasks) addTaskReferencedImageIds(referencedIds, task)
+
+  // 只枚举 key 清理孤立图片，避免启动时把所有 4K 原图读进内存。
+  const imageIds = await getAllImageIds()
+  const referencedImageIds: string[] = []
+  for (const id of imageIds) {
+    if (!isCurrent()) return
+    if (referencedIds.has(id)) {
+      referencedImageIds.push(id)
+    } else {
+      await deleteImage(id)
+    }
+  }
+  if (!isCurrent()) return
+  scheduleThumbnailBackfill(referencedImageIds)
+}
+
 /** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并清理孤立图片 */
-export async function initStore() {
+export async function initStore(options: { deferImageCleanup?: boolean } = {}) {
   const legacyAgentConversations = normalizeAgentConversations(useStore.getState().agentConversations)
   const storedTasks = await getAllTasks()
   const storedAgentConversations = normalizeAgentConversations(await getAllAgentConversations())
@@ -1440,40 +1473,12 @@ export async function initStore() {
     }
   }
 
-  // 收集所有任务引用的图片 id
-  const referencedIds = new Set<string>()
   const state = useStore.getState()
   const persistedInputImages = state.inputImages
   const galleryInputDraft = state.galleryInputDraft
   const agentConversations = state.agentConversations
   const agentInputDrafts = state.agentInputDrafts
-  for (const img of persistedInputImages) referencedIds.add(img.id)
-  if (galleryInputDraft) {
-    for (const img of galleryInputDraft.inputImages) referencedIds.add(img.id)
-  }
-  for (const draft of Object.values(agentInputDrafts)) {
-    for (const img of draft.inputImages) referencedIds.add(img.id)
-  }
-  for (const conversation of agentConversations) {
-    for (const round of conversation.rounds) {
-      for (const id of round.inputImageIds) referencedIds.add(id)
-    }
-  }
-  for (const t of tasks) {
-    addTaskReferencedImageIds(referencedIds, t)
-  }
-
-  // 只枚举 key 清理孤立图片，避免启动时把所有 4K 原图读进内存。
-  const imageIds = await getAllImageIds()
-  const referencedImageIds: string[] = []
-  for (const imgId of imageIds) {
-    if (referencedIds.has(imgId)) {
-      referencedImageIds.push(imgId)
-    } else {
-      await deleteImage(imgId)
-    }
-  }
-  scheduleThumbnailBackfill(referencedImageIds)
+  if (!options.deferImageCleanup) await cleanupUnreferencedImages(tasks)
 
   const restoredInputImages: InputImage[] = []
   for (const img of persistedInputImages) {

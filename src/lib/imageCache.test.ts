@@ -6,6 +6,7 @@ const db = vi.hoisted(() => ({
   getImageThumbnail: vi.fn(),
   getStoredFreshImageThumbnail: vi.fn(),
   putImage: vi.fn(),
+  putImageThumbnail: vi.fn(),
 }))
 
 vi.mock('./db', () => db)
@@ -20,6 +21,7 @@ import {
   getCachedImage,
   scheduleThumbnailBackfill,
   setRemoteImageLoader,
+  storeAndPublishImageThumbnail,
   subscribeImageThumbnail,
 } from './imageCache'
 
@@ -31,6 +33,7 @@ describe('imageCache', () => {
     db.getImageThumbnail.mockResolvedValue(undefined)
     db.getStoredFreshImageThumbnail.mockResolvedValue(undefined)
     db.putImage.mockResolvedValue('image')
+    db.putImageThumbnail.mockResolvedValue('thumbnail')
     setRemoteImageLoader(undefined)
   })
 
@@ -208,6 +211,35 @@ describe('imageCache', () => {
       height: 1000,
     })
     unsubscribe()
+  })
+
+  it('persists cloud thumbnails and notifies current subscribers through one entry point', async () => {
+    const onThumbnail = vi.fn()
+    subscribeImageThumbnail('cloud-image', onThumbnail)
+
+    await storeAndPublishImageThumbnail({
+      id: 'cloud-image',
+      thumbnailDataUrl: 'data:image/webp;base64,cloud',
+      width: 1024,
+      height: 768,
+      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+    })
+
+    expect(db.putImageThumbnail).toHaveBeenCalledWith({
+      id: 'cloud-image',
+      thumbnailDataUrl: 'data:image/webp;base64,cloud',
+      width: 1024,
+      height: 768,
+      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+    })
+    expect(onThumbnail).toHaveBeenCalledWith({
+      dataUrl: 'data:image/webp;base64,cloud',
+      width: 1024,
+      height: 768,
+    })
+    await expect(ensureImageThumbnailCached('cloud-image')).resolves.toMatchObject({
+      dataUrl: 'data:image/webp;base64,cloud',
+    })
   })
 
   it('allows a failed thumbnail backfill to be scheduled again', async () => {
