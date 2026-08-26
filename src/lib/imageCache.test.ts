@@ -5,6 +5,7 @@ const db = vi.hoisted(() => ({
   getImage: vi.fn(),
   getImageThumbnail: vi.fn(),
   getStoredFreshImageThumbnail: vi.fn(),
+  putImage: vi.fn(),
 }))
 
 vi.mock('./db', () => db)
@@ -14,9 +15,11 @@ import {
   cacheThumbnail,
   clearImageCaches,
   deleteImageCacheEntry,
+  ensureImageCached,
   ensureImageThumbnailCached,
   getCachedImage,
   scheduleThumbnailBackfill,
+  setRemoteImageLoader,
   subscribeImageThumbnail,
 } from './imageCache'
 
@@ -27,6 +30,8 @@ describe('imageCache', () => {
     db.getImage.mockResolvedValue(undefined)
     db.getImageThumbnail.mockResolvedValue(undefined)
     db.getStoredFreshImageThumbnail.mockResolvedValue(undefined)
+    db.putImage.mockResolvedValue('image')
+    setRemoteImageLoader(undefined)
   })
 
   afterEach(() => {
@@ -121,6 +126,61 @@ describe('imageCache', () => {
       dataUrl: 'stored-cleared-thumbnail',
     })
     expect(db.getStoredFreshImageThumbnail).toHaveBeenCalledWith('cleared')
+  })
+
+  it('loads a missing image remotely and persists it in IndexedDB', async () => {
+    const loadRemote = vi.fn().mockResolvedValue({
+      id: 'remote-image',
+      dataUrl: 'data:image/png;base64,remote',
+      createdAt: 10,
+      source: 'generated',
+      width: 1024,
+      height: 768,
+    })
+    setRemoteImageLoader(loadRemote)
+
+    await expect(ensureImageCached('remote-image')).resolves.toBe('data:image/png;base64,remote')
+    expect(loadRemote).toHaveBeenCalledOnce()
+    expect(db.putImage).toHaveBeenCalledWith({
+      id: 'remote-image',
+      dataUrl: 'data:image/png;base64,remote',
+      createdAt: 10,
+      source: 'generated',
+      width: 1024,
+      height: 768,
+    })
+    expect(getCachedImage('remote-image')).toBe('data:image/png;base64,remote')
+  })
+
+  it('deduplicates concurrent remote image requests and uses local cache afterwards', async () => {
+    let resolveRemote: (dataUrl: string) => void = () => undefined
+    const loadRemote = vi.fn().mockImplementation(() => new Promise<string>((resolve) => {
+      resolveRemote = resolve
+    }))
+    setRemoteImageLoader(loadRemote)
+
+    const first = ensureImageCached('remote-image')
+    const second = ensureImageCached('remote-image')
+    await vi.waitFor(() => expect(loadRemote).toHaveBeenCalledOnce())
+
+    resolveRemote('data:image/png;base64,remote')
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      'data:image/png;base64,remote',
+      'data:image/png;base64,remote',
+    ])
+
+    await ensureImageCached('remote-image')
+    expect(loadRemote).toHaveBeenCalledOnce()
+  })
+
+  it('does not call the remote loader when IndexedDB has the image', async () => {
+    db.getImage.mockResolvedValue({ id: 'local-image', dataUrl: 'data:image/png;base64,local' })
+    const loadRemote = vi.fn()
+    setRemoteImageLoader(loadRemote)
+
+    await expect(ensureImageCached('local-image')).resolves.toBe('data:image/png;base64,local')
+    expect(loadRemote).not.toHaveBeenCalled()
+    expect(db.putImage).not.toHaveBeenCalled()
   })
 
   it('prioritizes visible thumbnail backfills and notifies subscribers', async () => {

@@ -35,9 +35,16 @@ db.exec(`
     created_at INTEGER,
     source TEXT,
     width INTEGER,
-    height INTEGER
+    height INTEGER,
+    thumbnail_mime_type TEXT
   );
 `)
+
+// 兼容已存在的同步数据库：旧版本表没有缩略图 MIME 字段。
+const cloudImageColumns = db.prepare('PRAGMA table_info(cloud_images)').all()
+if (!cloudImageColumns.some((column) => column.name === 'thumbnail_mime_type')) {
+  db.exec('ALTER TABLE cloud_images ADD COLUMN thumbnail_mime_type TEXT')
+}
 
 function json(res, status, value) {
   const body = JSON.stringify(value)
@@ -122,7 +129,7 @@ function getSnapshot() {
     }
   }
   const data = JSON.parse(row.data)
-  const images = db.prepare('SELECT id, mime_type AS mimeType, created_at AS createdAt, source, width, height FROM cloud_images').all()
+  const images = db.prepare('SELECT id, mime_type AS mimeType, created_at AS createdAt, source, width, height, thumbnail_mime_type AS thumbnailMimeType FROM cloud_images').all()
   return {
     revision: row.revision,
     updatedAt: row.updated_at,
@@ -146,6 +153,8 @@ function writeSnapshot(input) {
     for (const image of images) {
       const path = imagePath(image.id)
       if (path) rmSync(path, { force: true })
+      const thumbnail = thumbnailPath(image.id)
+      if (thumbnail) rmSync(thumbnail, { force: true })
     }
     db.prepare('DELETE FROM cloud_images').run()
   }
@@ -166,6 +175,11 @@ function writeSnapshot(input) {
 function imagePath(id) {
   if (!/^[a-zA-Z0-9_-]{16,128}$/.test(id)) return null
   return join(dataDir, 'images', `${id}.bin`)
+}
+
+function thumbnailPath(id) {
+  if (!/^[a-zA-Z0-9_-]{16,128}$/.test(id)) return null
+  return join(dataDir, 'images', `${id}.thumb.bin`)
 }
 
 function requireAuth(req, res) {
@@ -267,16 +281,59 @@ async function handleApi(req, res, url) {
     return true
   }
 
-  const imageMatch = url.pathname.match(/^\/cloud-api\/images\/([a-zA-Z0-9_-]+)$/)
+  const imageMatch = url.pathname.match(/^\/cloud-api\/images\/([a-zA-Z0-9_-]+)(\/thumbnail)?$/)
   if (!imageMatch) {
     json(res, 404, { error: '接口不存在' })
     return true
   }
 
   const id = imageMatch[1]
+  const isThumbnail = Boolean(imageMatch[2])
   const path = imagePath(id)
   if (!path) {
     json(res, 400, { error: '图片 ID 无效' })
+    return true
+  }
+
+  if (isThumbnail) {
+    const thumbnail = thumbnailPath(id)
+    const image = db.prepare('SELECT thumbnail_mime_type FROM cloud_images WHERE id = ?').get(id)
+    if (req.method === 'GET') {
+      if (!image || !image.thumbnail_mime_type || !existsSync(thumbnail)) {
+        json(res, 404, { error: '缩略图不存在' })
+        return true
+      }
+      res.writeHead(200, {
+        'Content-Type': image.thumbnail_mime_type,
+        'Content-Length': statSync(thumbnail).size,
+        'Cache-Control': 'private, max-age=31536000, immutable',
+      })
+      createReadStream(thumbnail).pipe(res)
+      return true
+    }
+
+    if (req.method === 'PUT') {
+      try {
+        const body = await readBody(req, maxImageBytes)
+        const mimeType = String(req.headers['content-type'] || '').split(';')[0].trim()
+        if (!body.length || !mimeType.startsWith('image/')) {
+          json(res, 400, { error: '仅支持图片文件' })
+          return true
+        }
+        if (!image) {
+          json(res, 404, { error: '图片不存在' })
+          return true
+        }
+        writeFileSync(thumbnail, body)
+        db.prepare('UPDATE cloud_images SET thumbnail_mime_type = ? WHERE id = ?').run(mimeType, id)
+        res.writeHead(204).end()
+      } catch {
+        json(res, 400, { error: '缩略图上传失败' })
+      }
+      return true
+    }
+
+    res.writeHead(405, { Allow: 'GET, PUT' }).end()
     return true
   }
 
