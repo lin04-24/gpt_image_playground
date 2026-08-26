@@ -4118,6 +4118,16 @@ export async function clearFailedTasks(taskIds?: string[]) {
   }
 }
 
+/** 删除所有生成中的任务 */
+export async function clearRunningTasks(taskIds?: string[]) {
+  const targetTaskIds = taskIds ? new Set(taskIds) : null
+  const runningTaskIds = useStore.getState().tasks
+    .filter((task) => task.status === 'running' && (!targetTaskIds || targetTaskIds.has(task.id)))
+    .map((task) => task.id)
+
+  await removeMultipleTasks(runningTaskIds)
+}
+
 /** 删除单条任务 */
 export async function removeTask(task: TaskRecord) {
   const deletedCount = await removeTasks([task.id])

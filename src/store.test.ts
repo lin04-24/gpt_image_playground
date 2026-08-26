@@ -134,7 +134,7 @@ import { callImageApi } from './lib/api'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
-import { clearFailedTasks, deleteFavoriteCollection, editOutputs, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, regenerateAgentAssistantMessage, removeMultipleTasks, removeTask, reuseConfig, stopAgentResponse, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
+import { clearFailedTasks, clearRunningTasks, deleteFavoriteCollection, editOutputs, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, regenerateAgentAssistantMessage, removeMultipleTasks, removeTask, reuseConfig, stopAgentResponse, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
 
 const commitTaskDeletionImplementation = vi.mocked(commitTaskDeletion).getMockImplementation()!
 const deleteDbImageImplementation = vi.mocked(deleteDbImage).getMockImplementation()!
@@ -2967,6 +2967,24 @@ describe('agent context for removed outputs', () => {
     expect(state.tasks.map((item) => item.id)).toEqual(['done-task', 'running-task'])
     expect(state.selectedTaskIds).toEqual(['done-task'])
     expect(state.showToast).toHaveBeenCalledWith('已删除 2 个任务', 'success')
+  })
+
+  it('clears only running gallery tasks', async () => {
+    const running = task({ id: 'running-task', status: 'running', finishedAt: null, elapsed: null })
+    const done = task({ id: 'done-task', status: 'done' })
+    const failed = task({ id: 'failed-task', status: 'error', error: '生成失败' })
+    useStore.setState({
+      tasks: [running, done, failed],
+      selectedTaskIds: ['running-task', 'done-task'],
+      showToast: vi.fn(),
+    })
+
+    await clearRunningTasks()
+
+    const state = useStore.getState()
+    expect(state.tasks.map((item) => item.id)).toEqual(['done-task', 'failed-task'])
+    expect(state.selectedTaskIds).toEqual(['done-task'])
+    expect(state.showToast).toHaveBeenCalledWith('已删除 1 个任务', 'success')
   })
 
   it('matches partial failures in failed filters and searches error text', () => {

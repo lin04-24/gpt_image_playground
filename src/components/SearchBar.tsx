@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
-import { clearFailedTasks, useStore, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
+import { clearFailedTasks, clearRunningTasks, useStore, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds } from '../lib/favoriteState'
 import { useTooltip } from '../hooks/useTooltip'
 import Select from './Select'
@@ -67,9 +67,21 @@ export default function SearchBar() {
       return taskMatchesSearchQuery(task, q)
     }).length
   })
+  const runningCount = useStore((s) => {
+    const q = s.searchQuery.trim().toLowerCase()
+    return s.tasks.filter((task) => {
+      if (!taskMatchesFilterStatus(task, 'running')) return false
+      if (s.filterFavorite) {
+        if (!task.isFavorite) return false
+        if (s.activeFavoriteCollectionId && s.activeFavoriteCollectionId !== ALL_FAVORITES_COLLECTION_ID && !getTaskFavoriteCollectionIds(task, s.defaultFavoriteCollectionId).includes(s.activeFavoriteCollectionId)) return false
+      }
+      return taskMatchesSearchQuery(task, q)
+    }).length
+  })
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   const inCollectionOverview = filterFavorite && !activeFavoriteCollectionId
   const isFailedFilter = filterStatus === 'error'
+  const isRunningFilter = filterStatus === 'running'
   const favoriteTooltip = activeFavoriteCollectionId ? '返回收藏夹' : filterFavorite ? '退出收藏夹' : '收藏夹'
 
   useEffect(() => {
@@ -123,6 +135,32 @@ export default function SearchBar() {
     })
   }
 
+  const handleClearRunning = () => {
+    const state = useStore.getState()
+    const q = state.searchQuery.trim().toLowerCase()
+    const runningTaskIds = state.tasks
+      .filter((task) => {
+        if (!taskMatchesFilterStatus(task, 'running')) return false
+        if (state.filterFavorite) {
+          if (!task.isFavorite) return false
+          if (state.activeFavoriteCollectionId && state.activeFavoriteCollectionId !== ALL_FAVORITES_COLLECTION_ID && !getTaskFavoriteCollectionIds(task, state.defaultFavoriteCollectionId).includes(state.activeFavoriteCollectionId)) return false
+        }
+        return taskMatchesSearchQuery(task, q)
+      })
+      .map((task) => task.id)
+    const runningTaskCount = runningTaskIds.length
+    if (runningTaskCount === 0) return
+
+    setConfirmDialog({
+      title: '清除生成中任务',
+      message: `确定清除筛选范围内的生成中任务吗？共 ${runningTaskCount} 条记录。`,
+      confirmText: '清除',
+      cancelText: '取消',
+      tone: 'danger',
+      action: () => clearRunningTasks(runningTaskIds),
+    })
+  }
+
   const handleStatusChange = (val: any) => {
     if (val === filterStatus) return
     setFilterStatus(val)
@@ -167,13 +205,17 @@ export default function SearchBar() {
                 className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
               />
             </div>
-            {isFailedFilter && (
+            {(isFailedFilter || isRunningFilter) && (
               <button
                 type="button"
-                onClick={handleClearFailed}
-                disabled={failedCount === 0}
-                title={failedCount > 0 ? `清除 ${failedCount} 条失败记录` : '没有失败记录'}
-                aria-label={failedCount > 0 ? `清除 ${failedCount} 条失败记录` : '没有失败记录'}
+                onClick={isFailedFilter ? handleClearFailed : handleClearRunning}
+                disabled={isFailedFilter ? failedCount === 0 : runningCount === 0}
+                title={isFailedFilter
+                  ? failedCount > 0 ? `清除 ${failedCount} 条失败记录` : '没有失败记录'
+                  : runningCount > 0 ? `清除 ${runningCount} 条生成中任务` : '没有生成中的任务'}
+                aria-label={isFailedFilter
+                  ? failedCount > 0 ? `清除 ${failedCount} 条失败记录` : '没有失败记录'
+                  : runningCount > 0 ? `清除 ${runningCount} 条生成中任务` : '没有生成中的任务'}
                 className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 transition-all hover:bg-gray-50 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-white disabled:hover:text-gray-400 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-500 dark:hover:bg-white/[0.06] dark:hover:text-gray-300 dark:disabled:hover:bg-gray-900 dark:disabled:hover:text-gray-500"
               >
                 <TrashIcon className="h-[18px] w-[18px]" />
