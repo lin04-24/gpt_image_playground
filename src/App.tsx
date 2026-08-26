@@ -160,7 +160,7 @@ function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
             clearAppliedUrlSettings()
           })
 
-        void initStore().finally(() => {
+        void initStore({ deferImageCleanup: cloudEnabled }).finally(() => {
           if (active) setLocalReady(true)
         })
         return
@@ -185,14 +185,14 @@ function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
           })
       }
 
-      void initStore().finally(() => {
+      void initStore({ deferImageCleanup: cloudEnabled }).finally(() => {
         if (active) setLocalReady(true)
       })
     })
     return () => {
       active = false
     }
-  }, [setSettings])
+  }, [cloudEnabled, setSettings])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {

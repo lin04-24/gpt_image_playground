@@ -134,7 +134,7 @@ import { callImageApi } from './lib/api'
 import { callAgentResponsesApi, callBatchImageSingle } from './lib/agentApi'
 import { getFalQueuedImageResult } from './lib/falAiImageApi'
 import { removeKeyedBackgroundFromDataUrl } from './lib/transparentImage'
-import { clearFailedTasks, clearRunningTasks, deleteFavoriteCollection, editOutputs, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, regenerateAgentAssistantMessage, removeMultipleTasks, removeTask, reuseConfig, stopAgentResponse, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
+import { cleanupUnreferencedImages, clearFailedTasks, clearRunningTasks, deleteFavoriteCollection, editOutputs, getErrorToastMessage, getPersistedState, getTaskApiProfile, importData, initStore, regenerateAgentAssistantMessage, removeMultipleTasks, removeTask, reuseConfig, stopAgentResponse, submitAgentMessage, submitTask, taskMatchesFilterStatus, taskMatchesSearchQuery, useStore } from './store'
 
 const commitTaskDeletionImplementation = vi.mocked(commitTaskDeletion).getMockImplementation()!
 const deleteDbImageImplementation = vi.mocked(deleteDbImage).getMockImplementation()!
@@ -654,6 +654,22 @@ describe('agent conversation persistence', () => {
     expect(state.agentConversations.map((conversation) => conversation.id)).toEqual(['stored-conversation', 'legacy-conversation'])
     expect(state.activeAgentConversationId).toBe('legacy-conversation')
     expect(stored.map((conversation) => conversation.id)).toEqual(['stored-conversation', 'legacy-conversation'])
+  })
+
+  it('can defer orphan image cleanup until cloud sync has the full task set', async () => {
+    await clearImages()
+    await clearTasks()
+    useStore.setState({ inputImages: [], galleryInputDraft: null, agentInputDrafts: {}, agentConversations: [] })
+    await putImage({ id: 'remote-task-image', dataUrl: 'data:image/png;base64,remote' })
+    vi.mocked(deleteDbImage).mockClear()
+
+    await initStore({ deferImageCleanup: true })
+
+    expect(await getImage('remote-task-image')).toMatchObject({ id: 'remote-task-image' })
+    expect(deleteDbImage).not.toHaveBeenCalled()
+
+    await cleanupUnreferencedImages([])
+    expect(await getImage('remote-task-image')).toBeUndefined()
   })
 
   it('strips generated image payloads from legacy task raw payloads during startup migration', async () => {
