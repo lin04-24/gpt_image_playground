@@ -7,6 +7,10 @@ const MIN_PIXELS = 655_360
 const MAX_PIXELS = 8_294_400
 const MAX_1K_PIXELS = 1_572_864
 
+export function isGrokImagineImageModel(model: string) {
+  return model.trim().toLowerCase() === 'grok-imagine-image-2.0'
+}
+
 export type SizeTier = '1K' | '2K' | '4K'
 type PresetRatio = '1:1' | '3:2' | '2:3' | '16:9' | '9:16' | '4:3' | '3:4' | '21:9'
 
@@ -84,12 +88,25 @@ export function normalizeCodexCliImageSize(size: string) {
   return `${width}x${height}`
 }
 
-export function prependCodexCliSizePrompt(prompt: string, size: string) {
+export function prependImageSizePrompt(prompt: string, size: string) {
   if (size === 'auto') return prompt
   const trimmed = prompt.trimStart()
   const hint = `Generate at ${size} resolution.`
   if (trimmed.startsWith(hint)) return trimmed
   return `${hint} ${trimmed}`
+}
+
+export function getImageAspectRatio(size: string) {
+  const parsed = parseRatio(size)
+  if (!parsed || !Number.isInteger(parsed.width) || !Number.isInteger(parsed.height)) return undefined
+
+  const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b)
+  const divisor = gcd(parsed.width, parsed.height)
+  return `${parsed.width / divisor}:${parsed.height / divisor}`
+}
+
+export function prependCodexCliSizePrompt(prompt: string, size: string) {
+  return prependImageSizePrompt(prompt, size)
 }
 
 export function stripInjectedCodexCliSizePrompt(prompt: string, originalPrompt: string, size: string) {

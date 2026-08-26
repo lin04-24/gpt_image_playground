@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_PARAMS } from '../types'
 import { createDefaultOpenAIProfile, DEFAULT_SETTINGS } from './apiProfiles'
-import { callAgentConversationTitleApi, callAgentResponsesApi, parseBatchImageCallArguments } from './agentApi'
+import { callAgentConversationTitleApi, callAgentResponsesApi, callBatchImageSingle, parseBatchImageCallArguments } from './agentApi'
 
 describe('parseBatchImageCallArguments', () => {
   it('trims ids and prompts, fills missing ids, and skips empty prompts', () => {
@@ -182,6 +182,56 @@ describe('callAgentResponsesApi', () => {
     expect(body.instructions).toContain('Start every image prompt with exactly "Generate at 1024x1024 resolution." followed by a space.')
   })
 
+  it('sends aspect ratio for grok imagine Agent tools without size', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'OK' }] }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      apiMode: 'responses',
+      model: 'grok-imagine-image-2.0',
+    })
+
+    await callAgentResponsesApi({
+      settings: DEFAULT_SETTINGS,
+      profile,
+      params: { ...DEFAULT_PARAMS, size: '2560x1440' },
+      input: 'prompt',
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.tools[0].size).toBeUndefined()
+    expect(body.tools[0].aspect_ratio).toBe('16:9')
+    expect(body.instructions).not.toContain('Generate at 2560x1440 resolution.')
+  })
+
+  it('uses the hybrid image profile when building Agent image tools', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{ type: 'message', content: [{ type: 'output_text', text: 'OK' }] }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const profile = createDefaultOpenAIProfile({ apiKey: 'text-key', apiMode: 'responses', model: 'text-model' })
+    const imageProfile = createDefaultOpenAIProfile({ apiKey: 'image-key', apiMode: 'responses', model: 'grok-imagine-image-2.0' })
+
+    await callAgentResponsesApi({
+      settings: { ...DEFAULT_SETTINGS, agentApiConfigMode: 'hybrid' },
+      profile,
+      imageProfile,
+      params: { ...DEFAULT_PARAMS, size: '2560x1440' },
+      input: 'prompt',
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.tools[0].size).toBeUndefined()
+  })
+
   it('extracts image_generation results from base64 object fields', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       output: [{
@@ -210,6 +260,38 @@ describe('callAgentResponsesApi', () => {
       dataUrl: 'data:image/png;base64,ZmlsZQ==',
       actualParams: {},
     }])
+  })
+
+  it('sends aspect ratio for grok imagine batch generation without size', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      output: [{
+        type: 'image_generation_call',
+        id: 'ig_batch',
+        result: 'aW1hZ2U=',
+      }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    const profile = createDefaultOpenAIProfile({
+      apiKey: 'test-key',
+      apiMode: 'responses',
+      model: 'grok-imagine-image-2.0',
+    })
+
+    await callBatchImageSingle({
+      profile,
+      params: { ...DEFAULT_PARAMS, size: '2560x1440' },
+      batchItemId: 'batch-item',
+      prompt: 'prompt',
+      referenceImageDataUrls: [],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.tools[0].size).toBeUndefined()
+    expect(body.tools[0].aspect_ratio).toBe('16:9')
+    expect(body.input).toBe('Treat everything after this line as one complete image-generation prompt, including the resolution instruction. Follow it exactly without rewriting or omitting anything:\nprompt')
   })
 
   it('stops reading a stream when the caller aborts after output starts', async () => {

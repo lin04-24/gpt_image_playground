@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateImageSize, normalizeCodexCliImageSize, prependCodexCliSizePrompt, stripInjectedCodexCliSizePrompt } from './size'
+import { calculateImageSize, getImageAspectRatio, normalizeCodexCliImageSize, prependCodexCliSizePrompt, stripInjectedCodexCliSizePrompt } from './size'
 
 describe('calculateImageSize', () => {
   it('uses common 16:9 display resolutions for the built-in tiers', () => {
@@ -16,6 +16,14 @@ describe('calculateImageSize', () => {
 
   it('falls back to budget-based sizing for custom ratios', () => {
     expect(calculateImageSize('2K', '5:4')).toBe('2288x1824')
+  })
+})
+
+describe('getImageAspectRatio', () => {
+  it('reduces explicit dimensions to an API aspect ratio', () => {
+    expect(getImageAspectRatio('2560x1440')).toBe('16:9')
+    expect(getImageAspectRatio('1440x2160')).toBe('2:3')
+    expect(getImageAspectRatio('auto')).toBeUndefined()
   })
 })
 

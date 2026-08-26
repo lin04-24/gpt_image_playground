@@ -1,3 +1,17 @@
+## v1.0.0（2026-08-26）
+
+### 修复
+- 修复 `grok-imagine-image-2.0` 生成图片时的尺寸参数兼容问题。
+- 将应用内尺寸自动换算为上游原生 `aspect_ratio`：例如 `2560x1440` 对应 `16:9`，避免模型回退为默认 `2:3` 图片比例。
+- 覆盖 Images API、图像编辑、Responses API、Agent 原生模式与批量生成，保持各入口的比例行为一致。
+
+### 部署
+- Docker 更新命令明确为 `docker compose up -d --build --force-recreate`，避免仅重建容器而继续复用旧镜像。
+
+### 验证
+- Vitest：408 项测试通过。
+- 生产构建：TypeScript 与 Vite 构建通过。
+
 ## v0.2.0（2026-08-19）
 
 ### 性能优化

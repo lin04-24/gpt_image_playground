@@ -3,6 +3,7 @@ import { buildApiUrl, readClientDevProxyConfig, shouldUseApiProxy } from './devP
 import { appendStreamingFormatHint, getApiErrorMessage, getResponsesImageResultBase64, maybeAppendStreamingHint, MIME_MAP, normalizeBase64Image, pickActualParams, PROMPT_REWRITE_GUARD_PREFIX } from './imageApiShared'
 import { normalizeResponsesOutputItems } from './responsesOutputState'
 import { isEventStreamResponse, readJsonServerSentEvents, throwIfAborted } from './serverSentEvents'
+import { getImageAspectRatio, isGrokImagineImageModel, prependImageSizePrompt } from './size'
 
 export interface AgentApiResultImage {
   toolCallId?: string
@@ -59,7 +60,7 @@ const AGENT_MATH_FORMATTING_INSTRUCTIONS = [
   '- Do not use LaTeX delimiters like `\\(...\\)` or `\\[...\\]` in visible assistant text.',
 ].join('\n')
 
-function createAgentInstructions(settings: AppSettings, codexCliSize?: string) {
+function createAgentInstructions(settings: AppSettings, imagePromptSize?: string) {
   const maxToolRounds = Number.isFinite(settings.agentMaxToolRounds)
     ? Math.max(1, Math.trunc(settings.agentMaxToolRounds))
     : DEFAULT_AGENT_MAX_TOOL_ROUNDS
@@ -80,8 +81,8 @@ function createAgentInstructions(settings: AppSettings, codexCliSize?: string) {
     '- When the requested task is complete, stop calling tools and provide the final response.',
   ]
 
-  if (codexCliSize && codexCliSize !== 'auto') {
-    instructions.push('', `- Start every image prompt with exactly "Generate at ${codexCliSize} resolution." followed by a space.`)
+  if (imagePromptSize && imagePromptSize !== 'auto') {
+    instructions.push('', `- Start every image prompt with exactly "Generate at ${imagePromptSize} resolution." followed by a space.`)
   }
 
   if (settings.agentMathFormattingPrompt) instructions.push('', AGENT_MATH_FORMATTING_INSTRUCTIONS)
@@ -114,7 +115,10 @@ function createImageTool(params: TaskParams, profile: ApiProfile, maskDataUrl?: 
     moderation: params.moderation,
   }
 
-  if (!profile.codexCli) {
+  if (isGrokImagineImageModel(profile.model)) {
+    const aspectRatio = getImageAspectRatio(params.size)
+    if (aspectRatio) tool.aspect_ratio = aspectRatio
+  } else if (!profile.codexCli) {
     tool.size = params.size
   }
 
@@ -615,9 +619,14 @@ export async function callAgentResponsesApi(opts: {
   try {
     const body: Record<string, unknown> = {
       model: profile.model || settings.model,
-      instructions: createAgentInstructions(settings, (imageProfile ?? profile).codexCli ? params.size : undefined),
+      instructions: createAgentInstructions(
+        settings,
+        (imageProfile ?? profile).codexCli
+          ? params.size
+          : undefined,
+      ),
       input,
-      tools: createAgentTools(params, profile, settings, maskDataUrl),
+      tools: createAgentTools(params, imageProfile ?? profile, settings, maskDataUrl),
     }
     if (profile.reasoningEffort) body.reasoning = { effort: profile.reasoningEffort }
     if (profile.streamImages) {
@@ -754,7 +763,10 @@ export async function callBatchImageSingle(opts: {
     const referenceMapping = referenceImageDataUrls.length > 0
       ? `Attached reference images correspond to these ids, in order: ${(referenceIds ?? []).map((id) => `<ref id="${id}" />`).join(', ') || 'reference images'}.`
       : ''
-    const promptText = allowPromptRewrite ? prompt : `${PROMPT_REWRITE_GUARD_PREFIX}\n${prompt}`
+    const imagePrompt = profile.codexCli
+      ? prependImageSizePrompt(prompt, params.size)
+      : prompt
+    const promptText = allowPromptRewrite ? imagePrompt : `${PROMPT_REWRITE_GUARD_PREFIX}\n${imagePrompt}`
     const guardedPrompt = [referenceMapping, promptText].filter(Boolean).join('\n\n')
     let input: unknown
     if (referenceImageDataUrls.length > 0) {
@@ -780,7 +792,10 @@ export async function callBatchImageSingle(opts: {
       moderation: params.moderation,
       quality: params.quality,
     }
-    if (!profile.codexCli) {
+    if (isGrokImagineImageModel(profile.model)) {
+      const aspectRatio = getImageAspectRatio(params.size)
+      if (aspectRatio) tool.aspect_ratio = aspectRatio
+    } else if (!profile.codexCli) {
       tool.size = params.size
     }
     if (params.output_format !== 'png' && params.output_compression != null) {

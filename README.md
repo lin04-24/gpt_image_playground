@@ -26,7 +26,7 @@
 
 ## 与原版的不同
 
-本仓库基于原版继续开发，当前 `v0.2.0` 主要增加：
+本仓库基于原版继续开发，当前 `v1.0.0` 主要增加：
 
 - 设置中心：可填写自定义 API URL 和 API Key，支持保存多个服务商配置。
 - 模型管理：填写 API 后可拉取模型列表，并单独启用或禁用模型。
@@ -34,6 +34,13 @@
 - 单用户登录：公网部署时使用唯一访问令牌作为登录口令，未通过验证前不会加载工作区数据。
 - 云端同步：登录后可在设备之间同步任务、图片、对话、配置和模型清单。
 - 移动端适配：登录页、设置页和生图入口适配手机屏幕。
+
+### v1.0.0 更新内容
+
+- 修复 `grok-imagine-image-2.0` 的尺寸兼容：不再发送会触发上游错误的 `size` 字段。
+- 根据所选尺寸自动换算并发送原生 `aspect_ratio`，例如 `2560x1440` 会请求 `16:9`，避免回退为默认 `2:3` 纵向图片。
+- 兼容逻辑覆盖 Images API、图像编辑、Responses API、Agent 原生模式及批量生成。
+- Docker 更新源码时使用 `docker compose up -d --build --force-recreate`，确保新前端资源进入镜像。
 
 ### v0.2.0 更新内容
 
@@ -233,6 +240,8 @@ cd deploy/cloud
 printf 'LOGIN_TOKEN=请替换为高强度随机令牌\nAPI_PROXY_URL=https://api.openai.com/v1\nCOOKIE_SECURE=true\n' > .env
 docker compose up -d --build
 ```
+
+更新源码后请使用 `docker compose up -d --build --force-recreate`，其中 `--build` 会重新构建包含最新前端资源的镜像；单独使用 `--force-recreate` 只重建容器，仍会复用旧镜像。
 
 服务默认监听 `3000` 端口，并使用 `API_PROXY_URL` 提供同源模型 API 代理。生产环境应在 HTTPS 反向代理后使用，并保留 `COOKIE_SECURE=true`；仅在本机通过 HTTP 测试时才设置 `COOKIE_SECURE=false`。`LOGIN_TOKEN` 是单用户公网部署的唯一访问令牌。首次打开页面必须输入正确令牌，前端才会读取本地和云端数据；第一次登录会将两端数据合并，之后图片、参考图、任务、对话和完整配置（API Key、URL、模型及模型清单）都会自动增量同步。云端数据会保存在部署服务器上，请仅在自己可信且启用 HTTPS 的服务器上使用。已有部署可继续使用 `SYNC_PASSWORD`，但建议迁移至 `LOGIN_TOKEN`。
 

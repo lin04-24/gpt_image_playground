@@ -22,7 +22,7 @@ import {
   PROMPT_REWRITE_GUARD_PREFIX,
 } from './imageApiShared'
 import { isEventStreamResponse, readJsonServerSentEvents } from './serverSentEvents'
-import { prependCodexCliSizePrompt } from './size'
+import { getImageAspectRatio, isGrokImagineImageModel, prependImageSizePrompt } from './size'
 
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
@@ -136,7 +136,10 @@ function createResponsesImageTool(
     moderation: params.moderation,
   }
 
-  if (!profile.codexCli) {
+  if (isGrokImagineImageModel(profile.model)) {
+    const aspectRatio = getImageAspectRatio(params.size)
+    if (aspectRatio) tool.aspect_ratio = aspectRatio
+  } else if (!profile.codexCli) {
     tool.size = params.size
   }
 
@@ -481,8 +484,9 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
 
 async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
   const { prompt: originalPrompt, params, inputImageDataUrls } = opts
-  const sizePrompt = profile.codexCli && !opts.skipCodexCliSizePrompt
-    ? prependCodexCliSizePrompt(originalPrompt, params.size)
+  const shouldInjectSizePrompt = profile.codexCli && !opts.skipCodexCliSizePrompt
+  const sizePrompt = shouldInjectSizePrompt
+    ? prependImageSizePrompt(originalPrompt, params.size)
     : originalPrompt
   const prompt = profile.codexCli && !opts.settings.allowPromptRewrite
     ? `${PROMPT_REWRITE_GUARD_PREFIX}\n${sizePrompt}`
@@ -504,7 +508,10 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       const formData = new FormData()
       formData.append('model', profile.model)
       formData.append('prompt', prompt)
-      if (!profile.codexCli) {
+      if (isGrokImagineImageModel(profile.model)) {
+        const aspectRatio = getImageAspectRatio(params.size)
+        if (aspectRatio) formData.append('aspect_ratio', aspectRatio)
+      } else if (!profile.codexCli) {
         formData.append('size', params.size)
       }
       formData.append('output_format', params.output_format)
@@ -571,7 +578,10 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
         moderation: params.moderation,
       }
 
-      if (!profile.codexCli) {
+      if (isGrokImagineImageModel(profile.model)) {
+        const aspectRatio = getImageAspectRatio(params.size)
+        if (aspectRatio) body.aspect_ratio = aspectRatio
+      } else if (!profile.codexCli) {
         body.size = params.size
       }
 
@@ -974,8 +984,9 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
 
 async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
   const { prompt, params, inputImageDataUrls } = opts
-  const requestPrompt = profile.codexCli && !opts.skipCodexCliSizePrompt
-    ? prependCodexCliSizePrompt(prompt, params.size)
+  const shouldInjectSizePrompt = profile.codexCli && !opts.skipCodexCliSizePrompt
+  const requestPrompt = shouldInjectSizePrompt
+    ? prependImageSizePrompt(prompt, params.size)
     : prompt
   const mime = MIME_MAP[params.output_format] || 'image/png'
   const proxyConfig = readClientDevProxyConfig()
