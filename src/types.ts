@@ -107,6 +107,7 @@ export interface AppSettings {
   alwaysShowRetryButton: boolean
   allowPromptRewrite: boolean
   taskCompletionNotification: boolean
+  skipTaskDeletionConfirmation: boolean
   enterSubmit: boolean
   zipDownloadRoutes: ZipDownloadRoute[]
   agentScrollToBottomAfterSubmit: boolean

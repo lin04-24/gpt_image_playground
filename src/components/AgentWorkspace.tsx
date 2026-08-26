@@ -133,6 +133,7 @@ export default function AgentWorkspace() {
   const clearMaskDraft = useStore((s) => s.clearMaskDraft)
   const setAppMode = useStore((s) => s.setAppMode)
   const agentScrollToBottomAfterSubmit = useStore((s) => s.settings.agentScrollToBottomAfterSubmit)
+  const skipTaskDeletionConfirmation = useStore((s) => s.settings.skipTaskDeletionConfirmation)
   const agentEditingRoundId = useStore((s) => s.agentEditingRoundId)
   const agentEditingConversationId = useStore((s) => s.agentEditingConversationId)
   const setAgentEditingConversationId = useStore((s) => s.setAgentEditingConversationId)
@@ -877,7 +878,9 @@ export default function AgentWorkspace() {
                                     onClick={() => setDetailTaskId(block.task.id)}
                                     onReuse={() => handleReuse(block.task)}
                                     onEditOutputs={() => editOutputs(block.task)}
-                                    onDelete={() => setConfirmDialog({ title: '删除任务', message: '确定要删除这个任务吗？', action: () => removeTask(block.task) })}
+                                    onDelete={() => skipTaskDeletionConfirmation
+                                      ? void removeTask(block.task)
+                                      : setConfirmDialog({ title: '删除任务', message: '确定要删除这个任务吗？', action: () => removeTask(block.task) })}
                                   />
                                 </div>
                               )

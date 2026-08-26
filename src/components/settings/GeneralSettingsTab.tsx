@@ -181,6 +181,24 @@ export default function GeneralSettingsTab({
       </div>
       <div className="block">
         <div className="mb-1 flex items-center justify-between">
+          <span className="block text-sm text-gray-600 dark:text-gray-300">删除任务时不再确认</span>
+          <button
+            type="button"
+            onClick={() => commitSettings({ ...draft, skipTaskDeletionConfirmation: !draft.skipTaskDeletionConfirmation })}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.skipTaskDeletionConfirmation ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            role="switch"
+            aria-checked={draft.skipTaskDeletionConfirmation}
+            aria-label="删除任务时不再确认"
+          >
+            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.skipTaskDeletionConfirmation ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+          </button>
+        </div>
+        <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
+          开启后，点击删除任务会直接删除任务及其未被其他任务引用的图片。
+        </div>
+      </div>
+      <div className="block">
+        <div className="mb-1 flex items-center justify-between">
           <span className="block text-sm text-gray-600 dark:text-gray-300">发送消息后自动滚动到底部</span>
           <button
             type="button"

@@ -306,6 +306,10 @@ export default function DetailModal() {
 
   const handleDelete = () => {
     setDetailTaskId(null)
+    if (settings.skipTaskDeletionConfirmation) {
+      void removeTask(task)
+      return
+    }
     setConfirmDialog({
       title: '删除任务',
       message: '确定要删除这个任务吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
