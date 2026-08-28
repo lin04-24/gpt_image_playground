@@ -76,6 +76,8 @@ export async function buildApp({ database, redis, storage = createImageStorage()
   }
   if (typeof redis.duplicate === 'function') {
     const candidate = redis.duplicate()
+    // 订阅连接必须监听 error，否则 Redis 重启时未处理的 error 事件会直接击溃 API 进程
+    candidate.on('error', (error) => console.error('Redis event subscriber error:', error.message))
     if (typeof candidate.connect === 'function') {
       await candidate.connect()
       await candidate.subscribe(redisKeys.events, (message) => {
