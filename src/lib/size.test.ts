@@ -1,5 +1,30 @@
 import { describe, expect, it } from 'vitest'
-import { calculateImageSize, getImageAspectRatio, normalizeCodexCliImageSize, prependCodexCliSizePrompt, stripInjectedCodexCliSizePrompt } from './size'
+import { calculateImageSize, convertSizeParamFormat, getImageAspectRatio, normalizeCodexCliImageSize, prependCodexCliSizePrompt, stripInjectedCodexCliSizePrompt } from './size'
+
+describe('convertSizeParamFormat', () => {
+  it('converts pixel sizes to simplified ratios in ratio mode', () => {
+    expect(convertSizeParamFormat('1024x1024', 'ratio')).toBe('1:1')
+    expect(convertSizeParamFormat('1024x1536', 'ratio')).toBe('2:3')
+    expect(convertSizeParamFormat('1280x720', 'ratio')).toBe('16:9')
+  })
+
+  it('keeps existing ratios untouched in ratio mode', () => {
+    expect(convertSizeParamFormat('2:3', 'ratio')).toBe('2:3')
+    expect(convertSizeParamFormat('auto', 'ratio')).toBe('auto')
+  })
+
+  it('converts ratios to pixel sizes in size mode', () => {
+    expect(convertSizeParamFormat('2:3', 'size')).toBe('1024x1536')
+    expect(convertSizeParamFormat('16:9', 'size')).toBe('1280x720')
+    expect(convertSizeParamFormat('1024x1024', 'size')).toBe('1024x1024')
+    expect(convertSizeParamFormat('auto', 'size')).toBe('auto')
+  })
+
+  it('returns the original value when conversion is impossible', () => {
+    expect(convertSizeParamFormat('1:5', 'size')).toBe('1:5')
+    expect(convertSizeParamFormat('whatever', 'ratio')).toBe('whatever')
+  })
+})
 
 describe('calculateImageSize', () => {
   it('uses common 16:9 display resolutions for the built-in tiers', () => {

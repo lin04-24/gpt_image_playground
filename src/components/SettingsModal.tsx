@@ -1683,6 +1683,29 @@ export default function SettingsModal() {
                   />
                 </label>
               )}
+
+              {/* 12. 尺寸参数格式 */}
+              {activeProviderIsOpenAICompatible && (
+                <div className="block">
+                  <div className="mb-1.5 flex items-center justify-between gap-3">
+                    <span className="block text-sm text-gray-600 dark:text-gray-300">尺寸参数格式</span>
+                    <div className="w-28 shrink-0">
+                      <Select
+                        value={activeProfile.sizeParamFormat ?? 'ratio'}
+                        onChange={(value) => updateActiveProfile({ sizeParamFormat: value === 'size' ? 'size' : 'ratio' }, true)}
+                        options={[
+                          { label: '宽高比', value: 'ratio' },
+                          { label: '像素尺寸', value: 'size' },
+                        ]}
+                        className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-1.5 text-xs text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                      />
+                    </div>
+                  </div>
+                  <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
+                    发送请求时 size 参数使用的格式。宽高比模式会把不符合的像素尺寸自动转换为比例（如 1024x1536 → 2:3）；像素尺寸模式则把比例自动转换为像素尺寸（如 2:3 → 1024x1536）。仅影响发出的请求，应用内仍按像素尺寸显示和选择。
+                  </div>
+                </div>
+              )}
             </div>
             )}
             

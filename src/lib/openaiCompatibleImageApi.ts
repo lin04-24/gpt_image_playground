@@ -22,7 +22,7 @@ import {
   PROMPT_REWRITE_GUARD_PREFIX,
 } from './imageApiShared'
 import { isEventStreamResponse, readJsonServerSentEvents } from './serverSentEvents'
-import { getImageAspectRatio, isGrokImagineImageModel, prependImageSizePrompt } from './size'
+import { convertSizeParamFormat, getImageAspectRatio, isGrokImagineImageModel, prependImageSizePrompt } from './size'
 
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
@@ -410,13 +410,19 @@ async function parseResponsesApiStreamResponse(
 }
 
 export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile: ApiProfile, customProvider?: CustomProviderDefinition | null): Promise<CallApiResult> {
+  // 在入口统一按配置转换 size 格式，responses/images/自定义服务商模板三条路径都从这里取参数
+  const size = convertSizeParamFormat(opts.params.size, profile.sizeParamFormat ?? 'ratio')
+  const requestOpts = size === opts.params.size
+    ? opts
+    : { ...opts, params: { ...opts.params, size } }
+
   if (customProvider) {
-    return callCustomHttpImageApi(opts, profile, customProvider)
+    return callCustomHttpImageApi(requestOpts, profile, customProvider)
   }
 
   return profile.apiMode === 'responses'
-    ? callResponsesImageApi(opts, profile)
-    : callImagesApi(opts, profile)
+    ? callResponsesImageApi(requestOpts, profile)
+    : callImagesApi(requestOpts, profile)
 }
 
 async function callImagesApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {

@@ -1,3 +1,5 @@
+import type { SizeParamFormat } from '../types'
+
 const SIZE_PATTERN = /^\s*(\d+)\s*[xX×]\s*(\d+)\s*$/
 const RATIO_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*[:xX×]\s*(\d+(?:\.\d+)?)\s*$/
 const SIZE_MULTIPLE = 16
@@ -304,4 +306,24 @@ export function calculateImageSize(tier: SizeTier, ratio: string) {
 
   if (bestPixels === 0) return null
   return `${bestWidth}x${bestHeight}`
+}
+
+/**
+ * 按配置的格式转换 size 参数，使发送给接口的值符合所选模式：
+ * 宽高比模式下把像素尺寸转为简化比例（1024x1536 → 2:3），
+ * 像素尺寸模式下把比例转为 1K 档位像素（2:3 → 1024x1536）。
+ * 无法解析或转换失败时原样返回，由接口自行报错。
+ */
+export function convertSizeParamFormat(size: string, format: SizeParamFormat) {
+  const trimmed = size.trim()
+  if (!trimmed || trimmed === 'auto') return size
+
+  if (format === 'ratio') {
+    return getImageAspectRatio(trimmed) ?? size
+  }
+
+  if (SIZE_PATTERN.test(trimmed)) return normalizeImageSize(trimmed)
+  const parsed = parseRatio(trimmed)
+  if (!parsed) return size
+  return calculateImageSize('1K', `${parsed.width}:${parsed.height}`) ?? size
 }
