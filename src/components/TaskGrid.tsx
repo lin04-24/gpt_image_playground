@@ -1,6 +1,8 @@
-import { useMemo, useRef, useState, useEffect } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore, reuseConfig, editOutputs, removeTask, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds } from '../lib/favoriteState'
+import { getBackendPageState, setBackendPage, subscribeBackendPage } from '../lib/backendSync'
+import { ChevronLeftIcon, ChevronRightIcon } from './icons'
 import TaskCard from './TaskCard'
 
 export default function TaskGrid() {
@@ -31,8 +33,11 @@ export default function TaskGrid() {
   const startedWithCtrl = useRef(false)
   const initialSelection = useRef<string[]>([])
   const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+  const backendEnabled = import.meta.env.VITE_BACKEND_API === 'true'
+  const backendPage = useSyncExternalStore(subscribeBackendPage, getBackendPageState, getBackendPageState)
 
   const filteredTasks = useMemo(() => {
+    if (backendEnabled) return tasks
     const sorted = [...tasks].sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
     const q = searchQuery.trim().toLowerCase()
     
@@ -44,7 +49,7 @@ export default function TaskGrid() {
       if (!taskMatchesFilterStatus(t, filterStatus)) return false
       return taskMatchesSearchQuery(t, q)
     })
-  }, [tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId, defaultFavoriteCollectionId])
+  }, [backendEnabled, tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId, defaultFavoriteCollectionId])
 
   const handleDelete = (task: typeof tasks[0]) => {
     if (skipTaskDeletionConfirmation) {
@@ -262,6 +267,7 @@ export default function TaskGrid() {
   if (!filteredTasks.length) {
     return (
       <div className="text-center py-20 text-gray-400 dark:text-gray-500">
+        {backendEnabled && backendPage.error ? <p className="text-sm text-red-500">{backendPage.error}</p> : backendEnabled && backendPage.loading ? <p className="text-sm">正在加载任务...</p> : null}
         {searchQuery || filterFavorite ? (
           <p className="text-sm">没有找到匹配的任务</p>
         ) : (
@@ -319,6 +325,34 @@ export default function TaskGrid() {
           </div>
         ))}
       </div>
+      {backendEnabled && backendPage.totalPages > 1 && (
+        <nav aria-label="任务分页" className="flex items-center justify-center gap-2 pb-12" data-no-drag-select>
+          <button
+            type="button"
+            aria-label="上一页"
+            title="上一页"
+            disabled={backendPage.loading || backendPage.page <= 1}
+            onClick={() => setBackendPage(backendPage.page - 1)}
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+          >
+            <ChevronLeftIcon className="h-4 w-4" />
+          </button>
+          <span className="min-w-[7rem] text-center text-sm text-gray-600 dark:text-gray-300">
+            第 {backendPage.page} / {backendPage.totalPages} 页
+          </span>
+          <button
+            type="button"
+            aria-label="下一页"
+            title="下一页"
+            disabled={backendPage.loading || backendPage.page >= backendPage.totalPages}
+            onClick={() => setBackendPage(backendPage.page + 1)}
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06]"
+          >
+            <ChevronRightIcon className="h-4 w-4" />
+          </button>
+        </nav>
+      )}
+      {backendEnabled && backendPage.error && <p className="pb-10 text-center text-sm text-red-500">{backendPage.error}</p>}
       {selectionBox && (
         <div
           className="fixed bg-blue-500/20 border border-blue-500/50 pointer-events-none z-[30]"

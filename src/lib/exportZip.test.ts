@@ -48,7 +48,6 @@ describe('exportZip', () => {
       thumbnailsByImageId: new Map([[thumbnail.id, thumbnail]]),
       favoriteCollections: [],
       defaultFavoriteCollectionId: null,
-      agentConversations: [],
     })
     const parsed = await readExportZip(bytes)
 
@@ -91,7 +90,7 @@ describe('exportZip', () => {
     }
     const images: StoredImage[] = [
       { id: 'img-1', dataUrl: `data:image/png;base64,${'A'.repeat(600_000)}` },
-      { id: 'agent-only-image', dataUrl: `data:image/png;base64,${'A'.repeat(600_000)}` },
+      { id: 'unreferenced-image', dataUrl: `data:image/png;base64,${'A'.repeat(600_000)}` },
     ]
     const params = {
       options: { exportConfig: true, exportTasks: true },
@@ -102,7 +101,6 @@ describe('exportZip', () => {
       thumbnailsByImageId: new Map(),
       favoriteCollections: [],
       defaultFavoriteCollectionId: null,
-      agentConversations: [],
     }
     const plan = getExportZipPlan(
       params,
@@ -116,7 +114,6 @@ describe('exportZip', () => {
       return (await buildExportZip({
         ...params,
         tasks: part.tasks,
-        agentConversations: part.agentConversations,
         imageTasks: [task],
         images: images.filter((image) => imageIds.has(image.id)),
         includeManifestData: part.includeBaseData,
@@ -126,7 +123,7 @@ describe('exportZip', () => {
     expect(manifests[0].backupPart).toEqual({ id: '1700000001000', index: 1, total: plan.length })
     expect(manifests[0].tasks).toEqual([task])
     expect(manifests[1].tasks).toBeUndefined()
-    expect(manifests.flatMap((manifest) => Object.keys(manifest.imageFiles ?? {})).sort()).toEqual(['agent-only-image', 'img-1'])
+    expect(manifests.flatMap((manifest) => Object.keys(manifest.imageFiles ?? {})).sort()).toEqual(['img-1', 'unreferenced-image'])
     expect(manifests.find((manifest) => manifest.imageFiles?.['img-1'])?.imageFiles?.['img-1']).toMatchObject({
       path: 'images/task-task-1.png',
       createdAt: 1700000000000,
@@ -156,7 +153,6 @@ describe('exportZip', () => {
       thumbnailsByImageId: new Map(),
       favoriteCollections: [],
       defaultFavoriteCollectionId: null,
-      agentConversations: [],
     }
     const plan = getExportZipPlan(params, [], { maxBytes: 1_800_000, partBytes: 1_400_000 })
 
@@ -183,17 +179,9 @@ describe('exportZip', () => {
       }],
       favoriteCollections: [],
       defaultFavoriteCollectionId: null,
-      agentConversations: [{
-        id: 'ignored-conversation',
-        title: 'x'.repeat(600_000),
-        createdAt: 1,
-        updatedAt: 1,
-        rounds: [],
-        messages: [],
-      }],
     }, [{ id: 'ignored-image', bytes: 2_000_000 }], { maxBytes: 1_800_000, partBytes: 1_400_000 })
 
-    expect(plan).toEqual([{ imageIds: [], tasks: [], agentConversations: [], includeBaseData: true }])
+    expect(plan).toEqual([{ imageIds: [], tasks: [], includeBaseData: true }])
   })
 
 })

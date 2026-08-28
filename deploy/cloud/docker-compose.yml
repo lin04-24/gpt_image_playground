@@ -1,14 +1,92 @@
 services:
-  gpt-image-playground:
+  gip-api:
     build:
       context: ../..
       dockerfile: deploy/cloud/Dockerfile
+    command: ["node", "server/api/main.mjs"]
     ports:
-      - '3000:3000'
+      - '${APP_PORT:-3300}:3000'
     environment:
-      LOGIN_TOKEN: ${LOGIN_TOKEN:-${SYNC_PASSWORD:?请在 .env 中设置 LOGIN_TOKEN}}
+      LOGIN_TOKEN: ${LOGIN_TOKEN:?请在 .env 中设置 LOGIN_TOKEN}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?请在 .env 中设置 32 字节 CONFIG_ENCRYPTION_KEY}
+      DATABASE_URL: postgresql://gip:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@gip-postgres:5432/gip
+      REDIS_URL: redis://gip-redis:6379
+      IMAGE_DATA_DIR: /app/data
+      STATIC_DIR: /app/dist
+      APP_ORIGIN: ${APP_ORIGIN:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      API_PROXY_URL: ${API_PROXY_URL:?请在 .env 中设置 API_PROXY_URL}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-2592000}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-6}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-120}
     volumes:
-      - ./data:/app/data
+      - gip-image-data:/app/data
+    depends_on:
+      gip-postgres:
+        condition: service_healthy
+      gip-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
+
+  gip-worker:
+    build:
+      context: ../..
+      dockerfile: deploy/cloud/Dockerfile
+    command: ["node", "server/worker/main.mjs"]
+    environment:
+      LOGIN_TOKEN: ${LOGIN_TOKEN:?请在 .env 中设置 LOGIN_TOKEN}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?请在 .env 中设置 32 字节 CONFIG_ENCRYPTION_KEY}
+      DATABASE_URL: postgresql://gip:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@gip-postgres:5432/gip
+      REDIS_URL: redis://gip-redis:6379
+      IMAGE_DATA_DIR: /app/data
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-6}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-120}
+    volumes:
+      - gip-image-data:/app/data
+    depends_on:
+      gip-postgres:
+        condition: service_healthy
+      gip-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/data/worker.health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  gip-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: gip
+      POSTGRES_USER: gip
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+    volumes:
+      - gip-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gip -d gip"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  gip-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--save", "900", "1", "--save", "300", "10"]
+    volumes:
+      - gip-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  gip-postgres-data:
+  gip-redis-data:
+  gip-image-data:

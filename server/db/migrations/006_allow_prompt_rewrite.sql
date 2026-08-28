@@ -1,0 +1,2 @@
+ALTER TABLE tasks
+  ADD COLUMN IF NOT EXISTS allow_prompt_rewrite BOOLEAN NOT NULL DEFAULT false;

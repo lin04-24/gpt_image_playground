@@ -44,6 +44,7 @@ function SearchActionButton({
 }
 
 export default function SearchBar() {
+  const backendEnabled = import.meta.env.VITE_BACKEND_API === 'true'
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const searchQuery = useStore((s) => s.searchQuery)
@@ -205,7 +206,7 @@ export default function SearchBar() {
                 className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-white/[0.06] text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
               />
             </div>
-            {(isFailedFilter || isRunningFilter) && (
+            {(isFailedFilter || (!backendEnabled && isRunningFilter)) && (
               <button
                 type="button"
                 onClick={isFailedFilter ? handleClearFailed : handleClearRunning}

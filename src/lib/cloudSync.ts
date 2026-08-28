@@ -1,6 +1,6 @@
-import type { AgentConversation, AppSettings, StoredImage, TaskRecord } from '../types'
+import type { AppSettings, StoredImage, TaskRecord } from '../types'
 import { blobToDataUrl } from './dataUrl'
-import { clearImages, CURRENT_THUMBNAIL_VERSION, deleteTask, getAllAgentConversations, getAllImageIds, getAllTasks, getImage, getImageThumbnail, getStoredFreshImageThumbnail, getTask, putImage, putTask, replaceAgentConversations } from './db'
+import { clearImages, CURRENT_THUMBNAIL_VERSION, deleteTask, getAllImageIds, getAllTasks, getImage, getImageThumbnail, getStoredFreshImageThumbnail, getTask, putImage, putTask } from './db'
 import { clearImageCaches, setRemoteImageLoader, storeAndPublishImageThumbnail } from './imageCache'
 import { ALL_FAVORITES_COLLECTION_ID } from './favoriteState'
 import type { PersistedAppState } from './persistedState'
@@ -20,9 +20,7 @@ interface CloudSnapshot {
   revision: number
   state: PersistedAppState | null
   tasks: TaskRecord[]
-  agentConversations: AgentConversation[]
   deletedTaskIds: Record<string, number>
-  deletedConversationIds: Record<string, number>
   images: CloudImage[]
 }
 
@@ -37,9 +35,7 @@ interface CloudTaskPage {
 
 interface CloudBootstrapPage extends CloudTaskPage {
   state: PersistedAppState | null
-  agentConversations: AgentConversation[]
   deletedTaskIds: Record<string, number>
-  deletedConversationIds: Record<string, number>
 }
 
 interface CloudPageFilter {
@@ -76,7 +72,6 @@ let syncChangesPending = false
 let applyingCloudState = false
 let paginationInProgress = false
 let knownTaskIds = new Set<string>()
-let knownConversationIds = new Set<string>()
 let deferredTaskIds = new Set<string>()
 let cloudImages = new Map<string, CloudImage>()
 let cloudThumbnailRunning = 0
@@ -93,7 +88,6 @@ const cloudThumbnailJobs = new Map<string, CloudThumbnailJob>()
 
 interface PendingTombstones {
   tasks: Record<string, number>
-  conversations: Record<string, number>
 }
 
 class CloudPaginationRevisionError extends Error {}
@@ -104,10 +98,9 @@ function readPendingTombstones(): PendingTombstones {
     const value = JSON.parse(window.localStorage.getItem(TOMBSTONE_STORAGE_KEY) || '{}') as Partial<PendingTombstones>
     return {
       tasks: value.tasks && typeof value.tasks === 'object' ? value.tasks : {},
-      conversations: value.conversations && typeof value.conversations === 'object' ? value.conversations : {},
     }
   } catch {
-    return { tasks: {}, conversations: {} }
+    return { tasks: {} }
   }
 }
 
@@ -216,22 +209,16 @@ function mergeCloudState(remote: PersistedAppState | null, local: PersistedAppSt
 async function collectSnapshot(): Promise<Omit<CloudSnapshot, 'revision' | 'images'>> {
   const state = useStore.getState()
   const persisted = getPersistedState(state)
-  const [tasks, agentConversations] = await Promise.all([getAllTasks(), getAllAgentConversations()])
+  const tasks = await getAllTasks()
   const previous = latestSnapshot
   const pending = readPendingTombstones()
   return {
     state: persisted,
     tasks,
-    agentConversations,
     deletedTaskIds: removeDeletedIdsForCurrentRecords(
       mergeDeletedIds(getDeletedIds(tasks, previous?.tasks ?? [], previous?.deletedTaskIds ?? {}, getRecordTime), pending.tasks),
       tasks,
       getRecordTime,
-    ),
-    deletedConversationIds: removeDeletedIdsForCurrentRecords(
-      mergeDeletedIds(getDeletedIds(agentConversations, previous?.agentConversations ?? [], previous?.deletedConversationIds ?? {}, (conversation) => conversation.updatedAt), pending.conversations),
-      agentConversations,
-      (conversation) => conversation.updatedAt,
     ),
   }
 }
@@ -242,7 +229,6 @@ async function mergeRemoteWithLocalChanges(remote: CloudSnapshot): Promise<Cloud
     ...remote,
     state: mergeCloudState(remote.state, local.state!, latestSnapshot?.state ?? null),
     deletedTaskIds: mergeDeletedIds(remote.deletedTaskIds, local.deletedTaskIds),
-    deletedConversationIds: mergeDeletedIds(remote.deletedConversationIds, local.deletedConversationIds),
   }
 }
 
@@ -264,7 +250,6 @@ function applyRemoteState(remote: PersistedAppState | null) {
       dismissedCodexCliPrompts: remote.dismissedCodexCliPrompts,
       favoriteCollections: remote.favoriteCollections,
       defaultFavoriteCollectionId: remote.defaultFavoriteCollectionId,
-      agentInputDrafts: remote.agentInputDrafts,
       galleryInputDraft: remote.galleryInputDraft,
       cloudDataClearedAt: remote.cloudDataClearedAt,
     })
@@ -546,31 +531,18 @@ async function applyBootstrapPage(page: CloudBootstrapPage, snapshot: CloudSnaps
     await clearImages()
     assertCloudSyncSession(session)
   }
-  const localConversations = await getAllAgentConversations()
-  assertCloudSyncSession(session)
-  const conversations = mergeRecords(localConversations, snapshot.agentConversations, snapshot.deletedConversationIds, (conversation) => conversation.updatedAt)
-  await replaceAgentConversations(conversations)
   applyRemoteState(snapshot.state)
   await applyPageTasks(page, snapshot.deletedTaskIds, 'visible', true, session)
   assertCloudSyncSession(session)
-  setCloudState(() => {
-    useStore.setState((state) => ({
-      agentConversations: conversations,
-      activeAgentConversationId: state.activeAgentConversationId && conversations.some((conversation) => conversation.id === state.activeAgentConversationId)
-        ? state.activeAgentConversationId
-        : conversations[0]?.id ?? null,
-    }))
-  })
 }
 
 async function applyCompleteSnapshot(remote: CloudSnapshot, includeAllVisible = false, session?: number) {
   if (session !== undefined) assertCloudSyncSession(session)
   addCloudImages(remote.images)
   const localState = useStore.getState()
-  const [localTasks, localConversations] = await Promise.all([getAllTasks(), getAllAgentConversations()])
+  const localTasks = await getAllTasks()
   if (session !== undefined) assertCloudSyncSession(session)
   const tasks = mergeRecords(localTasks, remote.tasks, remote.deletedTaskIds, getRecordTime)
-  const conversations = mergeRecords(localConversations, remote.agentConversations, remote.deletedConversationIds, (conversation) => conversation.updatedAt)
   if ((remote.state?.cloudDataClearedAt ?? 0) > localState.cloudDataClearedAt) {
     clearCloudThumbnailQueue()
     clearImageCaches()
@@ -581,7 +553,6 @@ async function applyCompleteSnapshot(remote: CloudSnapshot, includeAllVisible = 
   const taskIds = new Set(tasks.map((task) => task.id))
   await Promise.all(localTasks.filter((task) => !taskIds.has(task.id)).map((task) => deleteTask(task.id)))
   await Promise.all(tasks.map((task) => putTask(task)))
-  await replaceAgentConversations(conversations)
   if (session !== undefined) assertCloudSyncSession(session)
   applyRemoteState(remote.state)
   const remoteById = new Map(tasks.map((task) => [task.id, task]))
@@ -592,13 +563,7 @@ async function applyCompleteSnapshot(remote: CloudSnapshot, includeAllVisible = 
         : state.tasks
           .map((task) => remoteById.get(task.id))
           .filter((task): task is TaskRecord => Boolean(task))
-      return {
-        tasks: visibleTasks,
-        agentConversations: conversations,
-        activeAgentConversationId: state.activeAgentConversationId && conversations.some((conversation) => conversation.id === state.activeAgentConversationId)
-          ? state.activeAgentConversationId
-          : conversations[0]?.id ?? null,
-      }
+      return { tasks: visibleTasks }
     })
   })
   if (includeAllVisible) {
@@ -628,9 +593,7 @@ function toSnapshot(page: CloudBootstrapPage): CloudSnapshot {
     revision: page.revision,
     state: page.state,
     tasks: page.tasks,
-    agentConversations: page.agentConversations,
     deletedTaskIds: page.deletedTaskIds,
-    deletedConversationIds: page.deletedConversationIds,
     images: page.images,
   }
 }
@@ -677,9 +640,7 @@ async function loadLegacySnapshot(session: number): Promise<CloudSnapshot> {
     revision: remote.revision,
     state: remote.state,
     tasks: firstTasks,
-    agentConversations: remote.agentConversations,
     deletedTaskIds: remote.deletedTaskIds,
-    deletedConversationIds: remote.deletedConversationIds,
     images: getPageImages(firstTasks, remote.images),
     nextCursor: tasks.length > PAGE_SIZE ? 'legacy' : null,
     totalTasks: tasks.length,
@@ -815,14 +776,12 @@ function clearAcknowledgedTombstones(snapshot: CloudSnapshot) {
   const pending = readPendingTombstones()
   writePendingTombstones({
     tasks: Object.fromEntries(Object.entries(pending.tasks).filter(([id, deletedAt]) => (snapshot.deletedTaskIds[id] ?? 0) < deletedAt)),
-    conversations: Object.fromEntries(Object.entries(pending.conversations).filter(([id, deletedAt]) => (snapshot.deletedConversationIds[id] ?? 0) < deletedAt)),
   })
 }
 
 async function updateKnownIds() {
   const tasks = await getAllTasks()
   knownTaskIds = new Set(tasks.map((task) => task.id))
-  knownConversationIds = new Set(useStore.getState().agentConversations.map((conversation) => conversation.id))
 }
 
 export async function getCloudSessionStatus(): Promise<CloudSessionStatus> {
@@ -844,6 +803,12 @@ export async function loginCloudSync(password: string) {
     body: JSON.stringify({ password }),
   })
   if (response.ok) {
+    try {
+      const data = await response.clone().json() as { csrfToken?: string }
+      if (data.csrfToken) window.sessionStorage.setItem('gpt-image-playground.backend-csrf', data.csrfToken)
+    } catch {
+      // 旧同步服务不返回 CSRF Token
+    }
     cloudAuthenticationFailed = false
     return
   }
@@ -908,17 +873,12 @@ function trackCloudDeletions() {
   if (applyingCloudState) return
   const state = useStore.getState()
   const taskIds = new Set(state.tasks.map((task) => task.id))
-  const conversationIds = new Set(state.agentConversations.map((conversation) => conversation.id))
   const pending = readPendingTombstones()
   const now = Date.now()
   for (const id of knownTaskIds) {
     if (!taskIds.has(id) && !deferredTaskIds.has(id)) pending.tasks[id] = Math.max(pending.tasks[id] ?? 0, now)
   }
-  for (const id of knownConversationIds) {
-    if (!conversationIds.has(id)) pending.conversations[id] = Math.max(pending.conversations[id] ?? 0, now)
-  }
   knownTaskIds = new Set([...taskIds, ...deferredTaskIds])
-  knownConversationIds = conversationIds
   writePendingTombstones(pending)
   schedulePriorityPages()
   if (syncing) {
@@ -938,7 +898,6 @@ export function startCloudSync() {
   cloudAuthenticationFailed = false
   const state = useStore.getState()
   knownTaskIds = new Set(state.tasks.map((task) => task.id))
-  knownConversationIds = new Set(state.agentConversations.map((conversation) => conversation.id))
   unsubscribe = useStore.subscribe(trackCloudDeletions)
   setRemoteImageLoader(async (id) => {
     const image = cloudImages.get(id)

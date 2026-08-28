@@ -1,9 +1,7 @@
-import type { AgentConversation, AgentInputDraft, AppMode, AppSettings, FavoriteCollection, InputImage, MaskDraft, TaskParams } from '../types'
+import type { AppSettings, FavoriteCollection, InputDraft, InputImage, MaskDraft, TaskParams } from '../types'
 import { normalizeSettings } from './apiProfiles'
-import { normalizeAgentConversations } from './agentConversationState'
 import { ensureDefaultFavoriteCollection, normalizeFavoriteCollections, resolveDefaultFavoriteCollectionId } from './favoriteState'
-import { cleanStaleAgentInputDrafts, getPersistableAgentInputDrafts, isEmptyAgentInputDraft, normalizeAgentInputDraft, normalizeAgentInputDrafts, normalizeAgentInputDraftsByKey, saveGalleryInputDraft } from './inputDraftState'
-import { getPersistableAgentConversations, stripPersistedAgentConversations } from './agentResponseState'
+import { isEmptyInputDraft, normalizeInputDraft, saveGalleryInputDraft } from './inputDraftState'
 
 export interface PersistedAppState {
   settings: AppSettings
@@ -11,14 +9,7 @@ export interface PersistedAppState {
   prompt?: string
   inputImages?: InputImage[]
   dismissedCodexCliPrompts: string[]
-  appMode: AppMode
-  galleryInputDraft: AgentInputDraft | null
-  agentConversations?: AgentConversation[]
-  activeAgentConversationId: string | null
-  agentInputDrafts: Record<string, AgentInputDraft>
-  agentSidebarCollapsed: boolean
-  agentAssetTab: 'references' | 'outputs'
-  agentAssetPanelCollapsed: boolean
+  galleryInputDraft: InputDraft | null
   favoriteCollections: FavoriteCollection[]
   defaultFavoriteCollectionId: string | null
   supportPromptDismissed: boolean
@@ -27,34 +18,28 @@ export interface PersistedAppState {
   cloudDataClearedAt: number
 }
 
-type PersistedStateSource = Omit<PersistedAppState, 'prompt' | 'inputImages' | 'agentConversations' | 'cloudDataClearedAt'> & {
+type PersistedStateSource = Omit<PersistedAppState, 'prompt' | 'inputImages' | 'cloudDataClearedAt'> & {
   prompt: string
   inputImages: InputImage[]
   maskDraft: MaskDraft | null
   maskEditorImageId: string | null
-  agentConversations: AgentConversation[]
   cloudDataClearedAt?: number
 }
 
 type PersistedStateFallback = Pick<
   PersistedAppState,
   'settings' | 'params' | 'dismissedCodexCliPrompts' | 'favoriteCollections' | 'defaultFavoriteCollectionId'
-> & {
-  agentConversations: AgentConversation[]
-}
+>
 
 export type NormalizedPersistedAppState = PersistedAppState & {
   prompt: string
   inputImages: InputImage[]
   maskDraft: MaskDraft | null
   maskEditorImageId: string | null
-  agentConversations: AgentConversation[]
 }
 
 export interface PersistedStateMergePlan {
   state: NormalizedPersistedAppState
-  hasLegacyAgentConversations: boolean
-  shouldMigrateAgentConversations: boolean
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -83,31 +68,29 @@ function normalizeParams(value: unknown, fallback: TaskParams): TaskParams {
   }
 }
 
-export function createPersistedState(state: PersistedStateSource, includeLegacyAgentConversations = false): PersistedAppState {
-  const settings = normalizeSettings(state.settings)
+export function createPersistedState(state: PersistedStateSource): PersistedAppState {
+  const normalizedSettings = normalizeSettings(state.settings)
+  const settings = import.meta.env.VITE_BACKEND_API === 'true'
+    ? {
+        ...normalizedSettings,
+        apiKey: '',
+        profiles: normalizedSettings.profiles.map((profile) => ({ ...profile, apiKey: '' })),
+      }
+    : normalizedSettings
   const galleryInputDraft = saveGalleryInputDraft(state)
   return {
     settings,
     params: state.params,
-    ...(settings.persistInputOnRestart && (state.appMode === 'gallery' || galleryInputDraft)
+    ...(settings.persistInputOnRestart
       ? {
           prompt: galleryInputDraft?.prompt ?? '',
           inputImages: galleryInputDraft?.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) ?? [],
         }
       : {}),
     dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
-    appMode: state.appMode,
     galleryInputDraft: settings.persistInputOnRestart && galleryInputDraft
       ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) }
       : null,
-    ...(includeLegacyAgentConversations
-      ? { agentConversations: getPersistableAgentConversations(state.agentConversations) }
-      : {}),
-    activeAgentConversationId: state.activeAgentConversationId,
-    agentInputDrafts: settings.persistInputOnRestart ? getPersistableAgentInputDrafts(state) : {},
-    agentSidebarCollapsed: state.agentSidebarCollapsed,
-    agentAssetTab: state.agentAssetTab,
-    agentAssetPanelCollapsed: state.agentAssetPanelCollapsed,
     favoriteCollections: state.favoriteCollections,
     defaultFavoriteCollectionId: state.defaultFavoriteCollectionId,
     supportPromptDismissed: state.supportPromptDismissed,
@@ -117,12 +100,8 @@ export function createPersistedState(state: PersistedStateSource, includeLegacyA
   }
 }
 
-export function migratePersistedState(persistedState: unknown, _version?: number): unknown {
-  if (!isRecord(persistedState)) return persistedState
-  return {
-    ...persistedState,
-    agentConversations: stripPersistedAgentConversations(persistedState.agentConversations),
-  }
+export function migratePersistedState(persistedState: unknown): unknown {
+  return persistedState
 }
 
 export function normalizePersistedState(
@@ -133,43 +112,13 @@ export function normalizePersistedState(
   if (!isRecord(persistedState)) return null
 
   const settings = normalizeSettings(persistedState.settings ?? fallback.settings)
-  const hasLegacyAgentConversations = Array.isArray(persistedState.agentConversations)
-  const agentConversations = hasLegacyAgentConversations
-    ? normalizeAgentConversations(persistedState.agentConversations)
-    : fallback.agentConversations
-  const activeAgentConversationId = typeof persistedState.activeAgentConversationId === 'string' && (
-    !hasLegacyAgentConversations || agentConversations.some((conversation) => conversation.id === persistedState.activeAgentConversationId)
-  )
-    ? persistedState.activeAgentConversationId
-    : agentConversations[0]?.id ?? null
-  const appMode = persistedState.appMode === 'agent' ? 'agent' : 'gallery'
   const galleryInputDraft = settings.persistInputOnRestart
-    ? normalizeAgentInputDraft(persistedState.galleryInputDraft ?? {
+    ? normalizeInputDraft(persistedState.galleryInputDraft ?? {
         prompt: persistedState.prompt,
         inputImages: persistedState.inputImages,
         maskDraft: null,
         maskEditorImageId: null,
       }, now)
-    : null
-  const normalizedAgentInputDrafts = !settings.persistInputOnRestart
-    ? {}
-    : hasLegacyAgentConversations
-      ? normalizeAgentInputDrafts(persistedState.agentInputDrafts, agentConversations)
-      : normalizeAgentInputDraftsByKey(persistedState.agentInputDrafts)
-  const cleanedAgentInputDrafts = cleanStaleAgentInputDrafts(normalizedAgentInputDrafts, activeAgentConversationId, now)
-  const agentInputDrafts = appMode === 'agent' && activeAgentConversationId && !cleanedAgentInputDrafts[activeAgentConversationId] && settings.persistInputOnRestart && typeof persistedState.prompt === 'string'
-    ? {
-        ...cleanedAgentInputDrafts,
-        [activeAgentConversationId]: normalizeAgentInputDraft({
-          prompt: persistedState.prompt,
-          inputImages: persistedState.inputImages,
-          maskDraft: null,
-          maskEditorImageId: null,
-        }, now),
-      }
-    : cleanedAgentInputDrafts
-  const restoredAgentDraft = settings.persistInputOnRestart && appMode === 'agent' && activeAgentConversationId
-    ? agentInputDrafts[activeAgentConversationId] ?? null
     : null
   const favoriteCollections = Array.isArray(persistedState.favoriteCollections)
     ? ensureDefaultFavoriteCollection(normalizeFavoriteCollections(persistedState.favoriteCollections, now), now)
@@ -177,20 +126,14 @@ export function normalizePersistedState(
   const preferredDefaultFavoriteCollectionId = persistedState.defaultFavoriteCollectionId === null || typeof persistedState.defaultFavoriteCollectionId === 'string'
     ? persistedState.defaultFavoriteCollectionId
     : fallback.defaultFavoriteCollectionId
+  const draft = galleryInputDraft && !isEmptyInputDraft(galleryInputDraft) ? galleryInputDraft : null
 
   return {
     state: {
       settings,
       params: normalizeParams(persistedState.params, fallback.params),
       dismissedCodexCliPrompts: normalizeStringArray(persistedState.dismissedCodexCliPrompts, fallback.dismissedCodexCliPrompts),
-      appMode,
-      galleryInputDraft: galleryInputDraft && !isEmptyAgentInputDraft(galleryInputDraft) ? galleryInputDraft : null,
-      agentConversations,
-      activeAgentConversationId,
-      agentInputDrafts,
-      agentSidebarCollapsed: Boolean(persistedState.agentSidebarCollapsed),
-      agentAssetTab: persistedState.agentAssetTab === 'references' ? 'references' : 'outputs',
-      agentAssetPanelCollapsed: Boolean(persistedState.agentAssetPanelCollapsed),
+      galleryInputDraft: draft,
       favoriteCollections,
       defaultFavoriteCollectionId: resolveDefaultFavoriteCollectionId(favoriteCollections, preferredDefaultFavoriteCollectionId),
       supportPromptDismissed: Boolean(persistedState.supportPromptDismissed),
@@ -199,22 +142,10 @@ export function normalizePersistedState(
       cloudDataClearedAt: typeof persistedState.cloudDataClearedAt === 'number' && Number.isFinite(persistedState.cloudDataClearedAt)
         ? persistedState.cloudDataClearedAt
         : 0,
-      prompt: restoredAgentDraft ? restoredAgentDraft.prompt : galleryInputDraft?.prompt ?? '',
-      inputImages: restoredAgentDraft ? restoredAgentDraft.inputImages : galleryInputDraft?.inputImages ?? [],
-      maskDraft: restoredAgentDraft ? restoredAgentDraft.maskDraft : galleryInputDraft?.maskDraft ?? null,
-      maskEditorImageId: restoredAgentDraft ? restoredAgentDraft.maskEditorImageId : galleryInputDraft?.maskEditorImageId ?? null,
+      prompt: draft?.prompt ?? '',
+      inputImages: draft?.inputImages ?? [],
+      maskDraft: draft?.maskDraft ?? null,
+      maskEditorImageId: draft?.maskEditorImageId ?? null,
     },
-    hasLegacyAgentConversations,
-    shouldMigrateAgentConversations: hasLegacyAgentConversations && agentConversations.length > 0,
   }
-}
-
-export function mergePersistedAgentConversations(stored: AgentConversation[], legacy: AgentConversation[]) {
-  const merged = new Map<string, AgentConversation>()
-  for (const conversation of stored) merged.set(conversation.id, conversation)
-  for (const conversation of legacy) {
-    const existing = merged.get(conversation.id)
-    if (!existing || conversation.updatedAt >= existing.updatedAt) merged.set(conversation.id, conversation)
-  }
-  return [...merged.values()].sort((a, b) => a.createdAt - b.createdAt)
 }

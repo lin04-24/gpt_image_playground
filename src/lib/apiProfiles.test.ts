@@ -42,6 +42,21 @@ describe('validateApiProfile', () => {
   })
 })
 
+describe('backend profile key state', () => {
+  it('preserves the server-side key marker without storing a key value', () => {
+    const settings = normalizeSettings({
+      profiles: [{
+        ...createDefaultOpenAIProfile(),
+        apiKey: '',
+        apiKeyConfigured: true,
+      }],
+    })
+
+    expect(settings.profiles[0].apiKey).toBe('')
+    expect(settings.profiles[0].apiKeyConfigured).toBe(true)
+  })
+})
+
 describe('generation profile', () => {
   it('uses the model selected for generation instead of the profile currently edited in settings', () => {
     const settings = normalizeSettings({
@@ -759,18 +774,6 @@ describe('custom providers', () => {
 
     expect(falProfile).toMatchObject({ provider: 'fal', apiMode: 'images', streamImages: false })
     expect(customProfile).toMatchObject({ provider: provider.id, apiMode: 'images', streamImages: false })
-  })
-
-  it('enables Agent submit auto scroll by default', () => {
-    expect(DEFAULT_SETTINGS.agentScrollToBottomAfterSubmit).toBe(true)
-    expect(normalizeSettings({}).agentScrollToBottomAfterSubmit).toBe(true)
-    expect(normalizeSettings({ agentScrollToBottomAfterSubmit: false }).agentScrollToBottomAfterSubmit).toBe(false)
-  })
-
-  it('enables Agent math formatting prompt by default', () => {
-    expect(DEFAULT_SETTINGS.agentMathFormattingPrompt).toBe(true)
-    expect(normalizeSettings({}).agentMathFormattingPrompt).toBe(true)
-    expect(normalizeSettings({ agentMathFormattingPrompt: false }).agentMathFormattingPrompt).toBe(false)
   })
 
   it('disables prompt rewrite allowance by default', () => {

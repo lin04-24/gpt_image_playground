@@ -2,6 +2,7 @@ node_modules/
 dist/
 dev-proxy.config.json
 .wrangler/
+.test-env/
 
 # 本地敏感配置与部署数据
 .env

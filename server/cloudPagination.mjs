@@ -58,7 +58,7 @@ function decodePageCursor(value) {
     if (!payload || !signature) return null
     const expected = createHmac('sha256', cursorSecret).update(payload).digest()
     const actual = Buffer.from(signature, 'base64url')
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null
+    if (actual.length !== expected.length || actual.toString('base64url') !== signature || !timingSafeEqual(actual, expected)) return null
     const cursor = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
     if (!Number.isInteger(cursor?.revision) || !Number.isInteger(cursor?.offset) || cursor.offset < 0 || typeof cursor.filter !== 'string') return null
     return cursor
@@ -128,9 +128,7 @@ export function getCloudSnapshotPage(snapshot, params) {
     page: {
       ...page,
       state: snapshot.state,
-      agentConversations: snapshot.agentConversations,
       deletedTaskIds: snapshot.deletedTaskIds,
-      deletedConversationIds: snapshot.deletedConversationIds,
     },
   }
 }

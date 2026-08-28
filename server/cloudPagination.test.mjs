@@ -20,9 +20,7 @@ function snapshot(tasks) {
     revision: 7,
     state: { defaultFavoriteCollectionId: 'default' },
     tasks,
-    agentConversations: [{ id: 'conversation-1' }],
     deletedTaskIds: {},
-    deletedConversationIds: {},
     images: tasks.map((item) => ({ id: `image-${item.id}`, mimeType: 'image/png', thumbnailMimeType: 'image/webp', dataUrl: 'must-not-be-returned' })),
   }
 }
@@ -51,7 +49,7 @@ describe('cloud snapshot pagination', () => {
       { id: 'image-newer', mimeType: 'image/png', thumbnailMimeType: 'image/webp' },
       { id: 'image-same-b', mimeType: 'image/png', thumbnailMimeType: 'image/webp' },
     ])
-    expect(first.page).toMatchObject({ protocolVersion: 2, revision: 7, totalTasks: 4, agentConversations: source.agentConversations })
+    expect(first.page).toMatchObject({ protocolVersion: 2, revision: 7, totalTasks: 4 })
 
     const second = getCloudSnapshotPage(source, new URLSearchParams({
       mode: 'page',
@@ -61,7 +59,7 @@ describe('cloud snapshot pagination', () => {
     }))
     expect(second.page.tasks.map((item) => item.id)).toEqual(['same-a', 'older'])
     expect(second.page).not.toHaveProperty('state')
-    expect(second.page).not.toHaveProperty('agentConversations')
+    expect(second.page).not.toHaveProperty('state')
   })
 
   it('uses the same search, status and favorite semantics as the gallery', () => {

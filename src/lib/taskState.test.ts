@@ -5,7 +5,6 @@ import {
   addImageSizeParam,
   createTaskDonePatch,
   createTaskErrorPatch,
-  deriveAgentImageActualParams,
   deriveGalleryActualParams,
   firstActualParams,
   mapActualParamsByImage,
@@ -94,18 +93,6 @@ describe('task actual params', () => {
     expect(firstActualParams(paramsList)).toEqual({ size: '1024x1024' })
     expect(mapActualParamsByImage(['image-a', 'image-b', 'image-c'], paramsList)).toEqual({
       'image-c': { size: '1024x1024' },
-    })
-  })
-
-  it('derives Agent single-image params with a fixed output count', () => {
-    expect(deriveAgentImageActualParams({ output_format: 'webp' }, { width: 1536, height: 1024 })).toEqual({
-      output_format: 'webp',
-      size: '1536x1024',
-      n: 1,
-    })
-    expect(deriveAgentImageActualParams({ size: '1024x1024' }, { width: 1536, height: 1024 })).toEqual({
-      size: '1024x1024',
-      n: 1,
     })
   })
 

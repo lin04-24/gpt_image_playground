@@ -1,0 +1,228 @@
+import type { TaskRecord } from '../types'
+
+export interface BackendTaskPage {
+  tasks: TaskRecord[]
+  page: number
+  pageSize: 30
+  totalTasks: number
+  totalPages: number
+}
+
+export interface BackendSession {
+  authenticated: boolean
+  csrfToken?: string
+}
+
+const CSRF_STORAGE_KEY = 'gpt-image-playground.backend-csrf'
+const profileUpsertQueues = new Map<string, Promise<void>>()
+
+function csrfToken() {
+  try {
+    return window.sessionStorage.getItem(CSRF_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+async function request(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers)
+  const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData
+  if (init.body && !isFormData && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  const method = (init.method || 'GET').toUpperCase()
+  const csrf = csrfToken()
+  if (csrf && method !== 'GET' && method !== 'HEAD') headers.set('X-CSRF-Token', csrf)
+  const response = await fetch(path, { ...init, headers, credentials: 'include' })
+  if (!response.ok) {
+    let message = `请求失败 (${response.status})`
+    try {
+      const body = await response.json() as { error?: { message?: string } | string }
+      message = typeof body.error === 'string' ? body.error : body.error?.message || message
+    } catch {
+      // 忽略非 JSON 错误响应
+    }
+    const error = new Error(message)
+    Object.assign(error, { status: response.status })
+    throw error
+  }
+  return response
+}
+
+export async function getBackendSession(): Promise<BackendSession> {
+  const response = await request('/api/auth/session')
+  return response.json() as Promise<BackendSession>
+}
+
+export async function loginBackend(password: string) {
+  const response = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
+  const result = await response.json() as BackendSession
+  if (result.csrfToken) window.sessionStorage.setItem(CSRF_STORAGE_KEY, result.csrfToken)
+  return result
+}
+
+export async function logoutBackend() {
+  await request('/api/auth/logout', { method: 'POST' })
+  window.sessionStorage.removeItem(CSRF_STORAGE_KEY)
+}
+
+export async function getBackendTasks(params: { page?: number; q?: string; status?: string; favorite?: boolean; collectionId?: string; signal?: AbortSignal } = {}) {
+  const query = new URLSearchParams({ page: String(params.page || 1) })
+  if (params.q) query.set('q', params.q)
+  if (params.status && params.status !== 'all') query.set('status', params.status)
+  if (params.favorite !== undefined) query.set('favorite', String(params.favorite))
+  if (params.collectionId) query.set('collectionId', params.collectionId)
+  const response = await request(`/api/tasks?${query.toString()}`, { signal: params.signal })
+  return response.json() as Promise<BackendTaskPage>
+}
+
+export async function createBackendTask(input: Record<string, unknown>) {
+  const response = await request('/api/tasks', { method: 'POST', body: JSON.stringify(input) })
+  return response.json() as Promise<TaskRecord>
+}
+
+export async function retryBackendTask(id: string) {
+  const response = await request(`/api/tasks/${encodeURIComponent(id)}/retry`, { method: 'POST' })
+  return response.json() as Promise<TaskRecord>
+}
+
+export async function deleteBackendTask(id: string) {
+  await request(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function updateBackendTaskFavorites(id: string, collectionIds: string[]) {
+  const response = await request(`/api/tasks/${encodeURIComponent(id)}/favorites`, { method: 'PUT', body: JSON.stringify({ collectionIds }) })
+  return response.json() as Promise<{ taskId: string; collectionIds: string[]; isFavorite: boolean }>
+}
+
+export async function uploadBackendImage(dataUrl: string, id?: string) {
+  const form = new FormData()
+  const blob = await (await fetch(dataUrl)).blob()
+  form.append('file', blob, 'image')
+  const response = await request('/api/images', { method: 'POST', headers: id ? { 'X-Image-Id': id } : undefined, body: form })
+  return response.json() as Promise<{ id: string; mimeType: string; width?: number; height?: number }>
+}
+
+export async function getBackendProfiles() {
+  const response = await request('/api/profiles')
+  return response.json() as Promise<Array<{
+    id: string
+    name: string
+    provider: string
+    hasApiKey: boolean
+    config: {
+      baseUrl?: string
+      model?: string
+      apiMode?: string
+      timeout?: number
+      codexCli?: boolean
+      streamImages?: boolean
+      reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+    }
+  }>>
+}
+
+export interface BackendFavoriteCollection {
+  id: string
+  name: string
+  isDefault: boolean
+  taskCount: number
+}
+
+export async function getBackendFavoriteCollections() {
+  const response = await request('/api/favorite-collections')
+  return response.json() as Promise<BackendFavoriteCollection[]>
+}
+
+export async function getBackendMigrationStatus() {
+  const response = await request('/api/migration/status')
+  return response.json() as Promise<{ enabled: boolean; id?: string; mode?: string; status?: string; counts?: Record<string, unknown> }>
+}
+
+export async function migrateBackendBrowserManifest(input: { sourceId: string; tasks: Array<{ id: string }>; images: Array<{ id: string; contentSha256?: string }> }) {
+  const response = await request('/api/migration/browser/manifest', { method: 'POST', body: JSON.stringify(input) })
+  return response.json() as Promise<{
+    sourceId: string
+    tasks: { total: number; missing: string[] }
+    images: { total: number; missing: string[]; conflicts: string[] }
+  }>
+}
+
+export async function migrateBackendBrowserImage(sourceId: string, id: string, dataUrl: string) {
+  const form = new FormData()
+  const blob = await (await fetch(dataUrl)).blob()
+  form.append('file', blob, 'image')
+  const response = await request('/api/migration/browser/images', {
+    method: 'POST',
+    headers: { 'X-Migration-Source': sourceId, 'X-Image-Id': id },
+    body: form,
+  })
+  return response.json() as Promise<{ sourceId: string; imported: number; existing: number; conflicts: number }>
+}
+
+export async function migrateBackendBrowserTasks(input: { sourceId: string; tasks: unknown[]; favoriteCollections?: unknown[]; defaultFavoriteCollectionId?: string | null }) {
+  const response = await request('/api/migration/browser/tasks', { method: 'POST', body: JSON.stringify(input) })
+  return response.json() as Promise<{ sourceId: string; imported: number; existing: number; conflicts: number }>
+}
+
+export async function finalizeBackendBrowserMigration(sourceId: string) {
+  const response = await request('/api/migration/browser/finalize', { method: 'POST', body: JSON.stringify({ sourceId }) })
+  return response.json() as Promise<{ sourceId: string; completed: boolean; counts: Record<string, number> }>
+}
+
+export async function createBackendFavoriteCollection(collection: { id: string; name: string; isDefault?: boolean }) {
+  const response = await request('/api/favorite-collections', { method: 'POST', body: JSON.stringify(collection) })
+  return response.json() as Promise<BackendFavoriteCollection>
+}
+
+export async function updateBackendFavoriteCollection(id: string, patch: { name?: string; isDefault?: boolean }) {
+  const response = await request(`/api/favorite-collections/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) })
+  return response.json() as Promise<BackendFavoriteCollection>
+}
+
+export async function deleteBackendFavoriteCollection(id: string) {
+  await request(`/api/favorite-collections/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function upsertBackendProfile(profile: { id: string; name: string; provider: string; apiKey: string; baseUrl: string; model: string; apiMode: string; timeout: number; codexCli: boolean; streamImages?: boolean; reasoningEffort?: string; responseFormatB64Json?: boolean; customProvider?: unknown }) {
+  const previous = profileUpsertQueues.get(profile.id) ?? Promise.resolve()
+  const current = previous.catch(() => undefined).then(async () => {
+    const profiles = await getBackendProfiles()
+    const body = { id: profile.id, name: profile.name, provider: profile.provider, apiKey: profile.apiKey, config: { baseUrl: profile.baseUrl, model: profile.model, apiMode: profile.apiMode, timeout: profile.timeout, codexCli: profile.codexCli, streamImages: profile.streamImages, reasoningEffort: profile.reasoningEffort, responseFormatB64Json: profile.responseFormatB64Json, customProvider: profile.customProvider } }
+    const method = profiles.some((item) => item.id === profile.id) ? 'PUT' : 'POST'
+    const path = method === 'PUT' ? `/api/profiles/${encodeURIComponent(profile.id)}` : '/api/profiles'
+    await request(path, { method, body: JSON.stringify(body) })
+  })
+  profileUpsertQueues.set(profile.id, current)
+  try {
+    await current
+  } finally {
+    if (profileUpsertQueues.get(profile.id) === current) profileUpsertQueues.delete(profile.id)
+  }
+}
+
+export interface BackendAppState {
+  settings?: Record<string, unknown>
+  galleryDraft?: Record<string, unknown>
+  updatedAt?: string
+}
+
+export async function getBackendAppState(): Promise<BackendAppState | null> {
+  const response = await request('/api/app-state')
+  const row = await response.json() as { settings?: unknown; gallery_draft?: unknown; updated_at?: string } | null
+  if (!row) return null
+  return { settings: (row.settings || undefined) as Record<string, unknown> | undefined, galleryDraft: (row.gallery_draft || undefined) as Record<string, unknown> | undefined, updatedAt: row.updated_at }
+}
+
+export async function putBackendAppState(input: { settings?: unknown; galleryDraft?: unknown }) {
+  await request('/api/app-state', { method: 'PUT', body: JSON.stringify(input) })
+}
+
+export function backendImageUrl(id: string, thumbnail = false) {
+  return `/api/images/${encodeURIComponent(id)}${thumbnail ? '/thumbnail' : ''}`
+}
+
+export function subscribeBackendEvents(onEvent: (event: MessageEvent) => void) {
+  const source = new EventSource('/api/events', { withCredentials: true })
+  source.onmessage = onEvent
+  for (const type of ['task.created', 'task.started', 'task.progress', 'task.completed', 'task.failed', 'thumbnail.ready', 'favorite.updated', 'sync.required']) source.addEventListener(type, onEvent)
+  return () => source.close()
+}

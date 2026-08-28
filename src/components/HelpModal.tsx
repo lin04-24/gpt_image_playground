@@ -1,11 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import type { AppMode } from '../types'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 
 interface HelpModalProps {
-  appMode: AppMode
   isFavoriteCollectionOverview?: boolean
   onClose: () => void
 }
@@ -20,10 +18,9 @@ function useIsMobile() {
   return isMobile
 }
 
-export default function HelpModal({ appMode, isFavoriteCollectionOverview = false, onClose }: HelpModalProps) {
+export default function HelpModal({ isFavoriteCollectionOverview = false, onClose }: HelpModalProps) {
   const isMobile = useIsMobile()
   const modalRef = useRef<HTMLDivElement>(null)
-  const isAgentMode = appMode === 'agent'
   useCloseOnEscape(true, onClose)
   usePreventBackgroundScroll(true, modalRef)
 
@@ -62,20 +59,7 @@ export default function HelpModal({ appMode, isFavoriteCollectionOverview = fals
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain mb-6 text-sm text-gray-600 dark:text-gray-300 space-y-6 custom-scrollbar pr-2">
-          {isAgentMode ? (
-            <>
-              <section>
-                <div className="space-y-4">
-                  <ul className="list-disc pl-4 space-y-2">
-                    <li>需要使用 Responses API 配置。</li>
-                    <li>可在输入区添加参考图片，生成结果会自动保存到画廊。</li>
-                    <li>调整尺寸、格式和数量后提交提示词即可生成图片。</li>
-                    <li>生成的图片会同步到画廊，可继续收藏、下载或编辑。</li>
-                  </ul>
-                </div>
-              </section>
-            </>
-          ) : isFavoriteCollectionOverview ? (
+          {isFavoriteCollectionOverview ? (
             <>
               <section>
                 <h4 className="mb-4 text-sm font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1.5">

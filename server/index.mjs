@@ -123,9 +123,7 @@ function getSnapshot() {
       updatedAt: 0,
       state: null,
       tasks: [],
-      agentConversations: [],
       deletedTaskIds: {},
-      deletedConversationIds: {},
       images: [],
     }
   }
@@ -136,9 +134,7 @@ function getSnapshot() {
     updatedAt: row.updated_at,
     state: data.state ?? null,
     tasks: Array.isArray(data.tasks) ? data.tasks : [],
-    agentConversations: Array.isArray(data.agentConversations) ? data.agentConversations : [],
     deletedTaskIds: data.deletedTaskIds && typeof data.deletedTaskIds === 'object' ? data.deletedTaskIds : {},
-    deletedConversationIds: data.deletedConversationIds && typeof data.deletedConversationIds === 'object' ? data.deletedConversationIds : {},
     images,
   }
 }
@@ -162,9 +158,7 @@ function writeSnapshot(input) {
   const data = JSON.stringify({
     state: input.state ?? null,
     tasks: Array.isArray(input.tasks) ? input.tasks : [],
-    agentConversations: Array.isArray(input.agentConversations) ? input.agentConversations : [],
     deletedTaskIds: input.deletedTaskIds && typeof input.deletedTaskIds === 'object' ? input.deletedTaskIds : {},
-    deletedConversationIds: input.deletedConversationIds && typeof input.deletedConversationIds === 'object' ? input.deletedConversationIds : {},
   })
   db.prepare(`
     INSERT INTO cloud_snapshot (id, revision, updated_at, data) VALUES (1, ?, ?, ?)

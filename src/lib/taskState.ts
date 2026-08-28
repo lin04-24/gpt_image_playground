@@ -67,13 +67,6 @@ export function addImageSizeParam(params: ActualParams | undefined, size: ImageS
   return { ...(params ?? {}), size: `${size.width}x${size.height}` }
 }
 
-export function deriveAgentImageActualParams(params: ActualParams | undefined, size: ImageSize | undefined): ActualParams {
-  return {
-    ...(addImageSizeParam(hasActualParams(params) ? params : undefined, size) ?? {}),
-    n: 1,
-  }
-}
-
 export function deriveGalleryActualParams(
   provider: ApiProvider,
   isAsyncCustomTask: boolean,

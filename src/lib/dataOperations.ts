@@ -1,6 +1,5 @@
-import type { AgentConversation, TaskRecord } from '../types'
+import type { TaskRecord } from '../types'
 
-export function hasActiveDataOperations(tasks: TaskRecord[], agentConversations: AgentConversation[]) {
+export function hasActiveDataOperations(tasks: TaskRecord[]) {
   return tasks.some((task) => task.status === 'running' || task.falRecoverable || task.customRecoverable)
-    || agentConversations.some((conversation) => conversation.rounds.some((round) => round.status === 'running'))
 }

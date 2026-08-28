@@ -28,11 +28,17 @@ const MAX_THUMBNAIL_CACHE_ENTRIES = 80
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4
 
 export type RemoteImageLoader = (id: string) => Promise<StoredImage | string | undefined>
+export type RemoteImageThumbnailLoader = (id: string) => Promise<StoredImageThumbnail | undefined>
 
 let remoteImageLoader: RemoteImageLoader | undefined
+let remoteImageThumbnailLoader: RemoteImageThumbnailLoader | undefined
 
 export function setRemoteImageLoader(loader: RemoteImageLoader | undefined) {
   remoteImageLoader = loader
+}
+
+export function setRemoteImageThumbnailLoader(loader: RemoteImageThumbnailLoader | undefined) {
+  remoteImageThumbnailLoader = loader
 }
 
 export function getCachedImage(id: string): string | undefined {
@@ -158,6 +164,22 @@ export async function ensureImageThumbnailCached(id: string): Promise<ImageThumb
 
   const rec = await getStoredFreshImageThumbnail(id)
   if (!rec?.thumbnailDataUrl) {
+    if (remoteImageThumbnailLoader) {
+      try {
+        const remote = await remoteImageThumbnailLoader(id)
+        if (remote) {
+          await storeAndPublishImageThumbnail(remote)
+          return {
+            dataUrl: remote.thumbnailDataUrl,
+            width: remote.width,
+            height: remote.height,
+            thumbnailVersion: remote.thumbnailVersion,
+          }
+        }
+      } catch {
+        // 服务端缩略图尚未完成时保留占位图，等待事件后重试。
+      }
+    }
     scheduleThumbnailBackfill([id], 'visible')
     return undefined
   }

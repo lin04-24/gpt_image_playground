@@ -68,7 +68,7 @@ export default function Header() {
         </div>
       </header>
       <div className="safe-area-top invisible pointer-events-none" aria-hidden="true"><div className="safe-header-inner" /></div>
-      {showHelp && <HelpModal appMode="gallery" isFavoriteCollectionOverview={filterFavorite && !activeFavoriteCollectionId} onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpModal isFavoriteCollectionOverview={filterFavorite && !activeFavoriteCollectionId} onClose={() => setShowHelp(false)} />}
     </>
   )
 }

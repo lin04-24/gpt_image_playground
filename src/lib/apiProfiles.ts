@@ -3,7 +3,6 @@ import type {
   ApiProfile,
   ApiProvider,
   AppSettings,
-  AgentApiConfigMode,
   CustomProviderContentType,
   CustomProviderDefinition,
   CustomProviderFileMapping,
@@ -13,7 +12,7 @@ import type {
   CustomProviderSubmitMapping,
   CustomProviderTemplate,
 } from '../types'
-import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, DEFAULT_ZIP_DOWNLOAD_ROUTES, ZIP_DOWNLOAD_ROUTE_VALUES } from '../types'
+import { DEFAULT_STREAM_PARTIAL_IMAGES, DEFAULT_ZIP_DOWNLOAD_ROUTES, ZIP_DOWNLOAD_ROUTE_VALUES } from '../types'
 import { shouldUseApiProxy } from './devProxy'
 import { normalizeReasoningEffort, normalizeStreamPartialImages, parseDefaultApiUrl } from './defaultApiUrl'
 import { readRuntimeEnv } from './runtimeEnv'
@@ -69,13 +68,6 @@ function getDefaultStreamImages(provider: ApiProvider, apiMode: ApiMode): boolea
 
 export { normalizeReasoningEffort, normalizeStreamPartialImages } from './defaultApiUrl'
 
-export function normalizeAgentMaxToolRounds(value: unknown, fallback: number | undefined = DEFAULT_AGENT_MAX_TOOL_ROUNDS): number {
-  const fallbackValue = fallback ?? DEFAULT_AGENT_MAX_TOOL_ROUNDS
-  const numeric = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(numeric)) return fallbackValue
-  return Math.min(50, Math.max(1, Math.trunc(numeric)))
-}
-
 export function isDefaultConfigOnlyEnabled(): boolean {
   return SHOW_DEFAULT_CONFIG_ONLY && (Boolean(RAW_DEFAULT_API_URL) || DEFAULT_OPENAI_API_PROXY)
 }
@@ -96,14 +88,6 @@ function normalizeProviderOrder(value: unknown, customProviders: CustomProviderD
     .filter((id, idx, list) => knownIds.has(id) && list.indexOf(id) === idx)
 
   return [...ordered, ...providerIds.filter((id) => !ordered.includes(id))]
-}
-
-function normalizeAgentApiConfigMode(value: unknown): AgentApiConfigMode {
-  return value === 'native' || value === 'hybrid' ? value : 'off'
-}
-
-export function isAgentTextApiProfile(profile: ApiProfile): boolean {
-  return profile.provider === 'openai' && profile.apiMode === 'responses'
 }
 
 function isCustomProviderTemplate(value: unknown): value is CustomProviderTemplate {
@@ -498,6 +482,7 @@ export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfil
     provider,
     baseUrl: provider === 'fal' ? rawBaseUrl.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL : rawBaseUrl,
     apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
+    apiKeyConfigured: record.apiKeyConfigured === true,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : defaults.timeout,
     apiMode,
@@ -549,15 +534,6 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     ? record.activeProfileId
     : profiles[0].id
   const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
-  const agentApiConfigMode = normalizeAgentApiConfigMode(record.agentApiConfigMode)
-  const firstAgentTextProfile = profiles.find(isAgentTextApiProfile)
-  const agentTextProfileId = typeof record.agentTextProfileId === 'string' && profiles.some((p) => p.id === record.agentTextProfileId && isAgentTextApiProfile(p))
-    ? record.agentTextProfileId
-    : (isAgentTextApiProfile(active) ? active.id : firstAgentTextProfile?.id ?? null)
-  const agentImageProfileId = typeof record.agentImageProfileId === 'string' && profiles.some((p) => p.id === record.agentImageProfileId)
-    ? record.agentImageProfileId
-    : active.id
-
   return {
     baseUrl: active.baseUrl,
     apiKey: active.apiKey,
@@ -579,13 +555,6 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     skipTaskDeletionConfirmation: typeof record.skipTaskDeletionConfirmation === 'boolean' ? record.skipTaskDeletionConfirmation : false,
     enterSubmit: typeof record.enterSubmit === 'boolean' ? record.enterSubmit : false,
     zipDownloadRoutes: normalizeZipDownloadRoutes(record.zipDownloadRoutes),
-    agentScrollToBottomAfterSubmit: typeof record.agentScrollToBottomAfterSubmit === 'boolean' ? record.agentScrollToBottomAfterSubmit : true,
-    agentMaxToolRounds: normalizeAgentMaxToolRounds(record.agentMaxToolRounds),
-    agentWebSearch: typeof record.agentWebSearch === 'boolean' ? record.agentWebSearch : false,
-    agentMathFormattingPrompt: typeof record.agentMathFormattingPrompt === 'boolean' ? record.agentMathFormattingPrompt : true,
-    agentApiConfigMode,
-    agentTextProfileId,
-    agentImageProfileId,
     generationProfileId: typeof record.generationProfileId === 'string' && profiles.some((p) => p.id === record.generationProfileId)
       ? record.generationProfileId
       : active.id,
@@ -595,18 +564,6 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     profiles,
     activeProfileId,
   }
-}
-
-export function getAgentTextApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
-  const normalized = normalizeSettings(settings)
-  if (normalized.agentApiConfigMode === 'off') return getActiveApiProfile(normalized)
-  return normalized.profiles.find((profile) => profile.id === normalized.agentTextProfileId) ?? null
-}
-
-export function getAgentImageApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile | null {
-  const normalized = normalizeSettings(settings)
-  if (normalized.agentApiConfigMode !== 'hybrid') return getAgentTextApiProfile(normalized)
-  return normalized.profiles.find((profile) => profile.id === normalized.agentImageProfileId) ?? null
 }
 
 export function getCustomProviderDefinition(settings: Partial<AppSettings> | unknown, provider: ApiProvider): CustomProviderDefinition | null {
@@ -910,11 +867,4 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   skipTaskDeletionConfirmation: false,
   enterSubmit: false,
   zipDownloadRoutes: DEFAULT_ZIP_DOWNLOAD_ROUTES,
-  agentScrollToBottomAfterSubmit: true,
-  agentMaxToolRounds: DEFAULT_AGENT_MAX_TOOL_ROUNDS,
-  agentWebSearch: false,
-  agentMathFormattingPrompt: true,
-  agentApiConfigMode: 'off',
-  agentTextProfileId: null,
-  agentImageProfileId: null,
 })

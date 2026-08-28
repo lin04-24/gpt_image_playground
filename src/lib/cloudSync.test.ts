@@ -10,7 +10,6 @@ const db = vi.hoisted(() => {
     tasks,
     clearImages: vi.fn(),
     deleteTask: vi.fn(async (id: string) => tasks.delete(id)),
-    getAllAgentConversations: vi.fn(async () => []),
     getAllImageIds: vi.fn<() => Promise<string[]>>(async () => []),
     getAllTasks: vi.fn(async () => [...tasks.values()]),
     getTask: vi.fn(async (id: string) => tasks.get(id)),
@@ -23,7 +22,6 @@ const db = vi.hoisted(() => {
       tasks.set(task.id, task)
       return task.id
     }),
-    replaceAgentConversations: vi.fn(async () => undefined),
   }
 })
 
@@ -41,8 +39,6 @@ const store = vi.hoisted(() => {
   const reset = () => {
     state = {
       tasks: [],
-      agentConversations: [],
-      activeAgentConversationId: null,
       cloudDataClearedAt: 0,
       searchQuery: '',
       filterStatus: 'all',
@@ -113,9 +109,7 @@ function snapshot(tasks: TaskRecord[] = [task()], images = [image()]) {
     revision: 1,
     state: null,
     tasks,
-    agentConversations: [],
     deletedTaskIds: {},
-    deletedConversationIds: {},
     images,
   }
 }
@@ -126,9 +120,7 @@ function bootstrapPage(tasks: TaskRecord[], images: ReturnType<typeof image>[], 
     revision: 1,
     state: null,
     tasks,
-    agentConversations: [],
     deletedTaskIds: {},
-    deletedConversationIds: {},
     images,
     nextCursor,
     totalTasks: tasks.length,

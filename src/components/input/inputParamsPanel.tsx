@@ -33,17 +33,14 @@ export default function InputParamsPanel({
   commitOutputCompression,
   moderationHint,
   moderationDisabled,
-  agentAutoImageCount,
   outputImageLimit,
   nInput,
   setNInputFocused,
   commitN,
   handleNInputChange,
   handleNLimitIncreaseAttempt,
-  showAgentNHint,
+  showNLimitHint,
   hideNLimitHint,
-  startAgentNHintTouch,
-  clearAgentNHintTouchTimer,
   nLimitHint,
   nLimitHintText,
   streamConcurrentByN,
@@ -73,17 +70,14 @@ export default function InputParamsPanel({
   commitOutputCompression: () => void
   moderationHint: HintTooltipState
   moderationDisabled: boolean
-  agentAutoImageCount: boolean
   outputImageLimit: number
   nInput: string
   setNInputFocused: (focused: boolean) => void
   commitN: () => void
   handleNInputChange: (value: string) => void
   handleNLimitIncreaseAttempt: (preventDefault: () => void) => void
-  showAgentNHint: () => void
+  showNLimitHint: () => void
   hideNLimitHint: () => void
-  startAgentNHintTouch: () => void
-  clearAgentNHintTouchTimer: () => void
   nLimitHint: HintTooltipState
   nLimitHintText: string
   streamConcurrentByN: boolean
@@ -258,16 +252,16 @@ export default function InputParamsPanel({
       </label>
       <label
         className="relative flex flex-col gap-0.5"
-        onMouseEnter={() => { showAgentNHint(); streamConcurrentHint.show() }}
+        onMouseEnter={() => { showNLimitHint(); streamConcurrentHint.show() }}
         onMouseLeave={() => { hideNLimitHint(); streamConcurrentHint.hide() }}
-        onTouchStart={() => { startAgentNHintTouch(); streamConcurrentHint.startTouch() }}
-        onTouchEnd={() => { clearAgentNHintTouchTimer(); streamConcurrentHint.clearTimer() }}
+        onTouchStart={streamConcurrentHint.startTouch}
+        onTouchEnd={streamConcurrentHint.clearTimer}
         onTouchCancel={() => {
-          clearAgentNHintTouchTimer()
+          hideNLimitHint()
           hideNLimitHint()
           streamConcurrentHint.hide()
         }}
-        onClick={() => { showAgentNHint(); streamConcurrentHint.show() }}
+        onClick={() => { showNLimitHint(); streamConcurrentHint.show() }}
       >
         <span className="text-gray-400 dark:text-gray-500 ml-1">数量</span>
         <input
@@ -288,14 +282,10 @@ export default function InputParamsPanel({
               handleNLimitIncreaseAttempt(() => e.preventDefault())
             }
           }}
-          disabled={agentAutoImageCount}
-          type={agentAutoImageCount ? 'text' : 'number'}
-          min={agentAutoImageCount ? undefined : 1}
-          max={agentAutoImageCount ? undefined : outputImageLimit}
+          min={1}
+          max={outputImageLimit}
           className={`px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm ${
-            agentAutoImageCount
-              ? 'bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed'
-              : 'bg-white/50 dark:bg-white/[0.03]'
+            'bg-white/50 dark:bg-white/[0.03]'
           }`}
         />
         <ButtonTooltip visible={nLimitHint.visible} text={nLimitHintText} />
