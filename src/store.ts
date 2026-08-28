@@ -53,7 +53,7 @@ import { ALL_FAVORITES_COLLECTION_ID, DEFAULT_FAVORITE_COLLECTION_ID, createDefa
 import { createPersistedState, migratePersistedState, normalizePersistedState } from './lib/persistedState'
 import { addImageSizeParam, createTaskDonePatch, createTaskErrorPatch, deriveGalleryActualParams, firstActualParams, hasActualParams, hasActualSizeParam, mapActualParamsByImage, mapRevisedPromptsByImage, markInterruptedOpenAIRunningTasks } from './lib/taskState'
 import { stripInjectedCodexCliSizePrompt } from './lib/size'
-import { createBackendFavoriteCollection, createBackendTask, deleteBackendFavoriteCollection, deleteBackendTask, retryBackendTask, updateBackendFavoriteCollection, updateBackendTaskFavorites, uploadBackendImage, upsertBackendProfile } from './lib/backendApi'
+import { BACKEND_PAGE_SIZE, createBackendFavoriteCollection, createBackendTask, deleteBackendFavoriteCollection, deleteBackendTask, retryBackendTask, updateBackendFavoriteCollection, updateBackendTaskFavorites, uploadBackendImage, upsertBackendProfile } from './lib/backendApi'
 
 const FAL_RECOVERY_POLL_MS = 10_000
 const CUSTOM_RECOVERY_POLL_MS = 10_000
@@ -1261,7 +1261,7 @@ async function submitTaskViaBackend(options: {
     transparentPrompt: options.transparentPrompt,
   })
   const currentTasks = useStore.getState().tasks
-  useStore.getState().setTasks([task, ...currentTasks.filter((item) => item.id !== task.id)])
+  useStore.getState().setTasks([task, ...currentTasks.filter((item) => item.id !== task.id)].slice(0, BACKEND_PAGE_SIZE))
   await putTask(task)
   useStore.getState().showToast('任务已提交', 'success')
 }
@@ -1766,7 +1766,7 @@ export async function retryTask(task: TaskRecord) {
   if (import.meta.env.VITE_BACKEND_API === 'true') {
     try {
       const retried = await retryBackendTask(task.id)
-      useStore.getState().setTasks([retried, ...useStore.getState().tasks])
+      useStore.getState().setTasks([retried, ...useStore.getState().tasks].slice(0, BACKEND_PAGE_SIZE))
       await putTask(retried)
       useStore.getState().showToast('任务已重新排队', 'success')
     } catch (error) {

@@ -1,9 +1,11 @@
 import type { TaskRecord } from '../types'
 
+export const BACKEND_PAGE_SIZE = 30
+
 export interface BackendTaskPage {
   tasks: TaskRecord[]
   page: number
-  pageSize: 30
+  pageSize: typeof BACKEND_PAGE_SIZE
   totalTasks: number
   totalPages: number
 }

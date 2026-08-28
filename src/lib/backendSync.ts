@@ -3,7 +3,7 @@ import { blobToDataUrl } from './dataUrl'
 import { CURRENT_THUMBNAIL_VERSION, getAllImageIds, getAllTasks, getImage, putTask } from './db'
 import { clearImageCaches, ensureImageCached, setRemoteImageLoader, setRemoteImageThumbnailLoader } from './imageCache'
 import { isEmptyInputDraft, normalizeInputDraft, restoreGalleryInputDraftState } from './inputDraftState'
-import { backendImageUrl, finalizeBackendBrowserMigration, getBackendAppState, getBackendFavoriteCollections, getBackendMigrationStatus, getBackendProfiles, getBackendTasks, migrateBackendBrowserImage, migrateBackendBrowserManifest, migrateBackendBrowserTasks, putBackendAppState, subscribeBackendEvents, uploadBackendImage, upsertBackendProfile } from './backendApi'
+import { BACKEND_PAGE_SIZE, backendImageUrl, finalizeBackendBrowserMigration, getBackendAppState, getBackendFavoriteCollections, getBackendMigrationStatus, getBackendProfiles, getBackendTasks, migrateBackendBrowserImage, migrateBackendBrowserManifest, migrateBackendBrowserTasks, putBackendAppState, subscribeBackendEvents, uploadBackendImage, upsertBackendProfile } from './backendApi'
 import { useStore } from '../store'
 
 let stopEvents: (() => void) | null = null
@@ -19,7 +19,7 @@ const listeners = new Set<() => void>()
 
 export interface BackendPageState {
   page: number
-  pageSize: 30
+  pageSize: typeof BACKEND_PAGE_SIZE
   totalTasks: number
   totalPages: number
   loading: boolean
@@ -29,7 +29,8 @@ export interface BackendPageState {
 const initialPage = typeof window === 'undefined'
   ? 1
   : Math.max(1, Math.trunc(Number(new URLSearchParams(window.location.search).get('page'))) || 1)
-let pageState: BackendPageState = { page: initialPage, pageSize: 30, totalTasks: 0, totalPages: 0, loading: false, error: '' }
+const backendModeEnabled = import.meta.env.VITE_BACKEND_API === 'true'
+let pageState: BackendPageState = { page: initialPage, pageSize: BACKEND_PAGE_SIZE, totalTasks: 0, totalPages: 0, loading: backendModeEnabled, error: '' }
 
 function setPageState(patch: Partial<BackendPageState>) {
   pageState = { ...pageState, ...patch }
@@ -77,13 +78,15 @@ function updateUrl(page: number) {
 }
 
 export async function synchronizeBackendData(page = pageState.page) {
-  if (browserMigrationPromise) await browserMigrationPromise
   requestController?.abort()
   const controller = new AbortController()
   requestController = controller
   setPageState({ page, loading: true, error: '' })
+  // 后端分页是当前画廊的唯一可见数据集，避免请求期间继续展示本地全量缓存。
+  useStore.setState({ tasks: [], selectedTaskIds: [] })
   updateUrl(page)
   try {
+    if (browserMigrationPromise) await browserMigrationPromise
     const result = await getBackendTasks({ page, ...currentFilter(), signal: controller.signal })
     if (requestController !== controller) return
     if (result.totalPages > 0 && result.page > result.totalPages) {
@@ -294,6 +297,7 @@ export function stopBackendSync() {
   appStateTimer = null
   if (shouldFlushAppState) void pushBackendAppState().catch((error) => console.warn('Backend app state flush failed:', error))
   hydratingState = false
+  setPageState({ loading: backendModeEnabled, error: '' })
   setRemoteImageLoader(undefined)
   setRemoteImageThumbnailLoader(undefined)
 }
