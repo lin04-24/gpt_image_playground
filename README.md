@@ -1,3 +1,21 @@
+# V2.0.3 发布说明
+
+V2.0.3 新增尺寸参数格式设置，版本标签为 `V2.0.3`，对应分支为 `V2.0.3`，并已发布至 [GitHub Releases](https://github.com/lin04-24/gpt_image_playground/releases/tag/V2.0.3)。
+
+## 功能情况
+
+- 设置 → API 配置新增「尺寸参数格式」选项：可选宽高比（默认，如 1:1、2:3、16:9）或像素尺寸（M×N，如 1024x1536）两种 size 参数格式。
+- 发送请求时自动把不符合所选格式的参数转换成符合的参数：宽高比模式将像素尺寸转为简化比例（1024x1536 → 2:3），像素尺寸模式将比例转为 1K 档位像素（2:3 → 1024x1536）。
+- 转换覆盖 OpenAI 兼容 images、responses 与自定义 HTTP 服务商模板（`$params.size`）三类请求路径；Codex CLI 兼容模式注入的分辨率提示语随所选格式变化，fal.ai 请求不受影响。
+- 该设置按 API 配置（Profile）独立保存，随配置导入导出和切换服务商保留；仅影响发出的请求，应用内仍按像素尺寸显示与选择。
+
+## 验证
+
+- `npm run build`
+- `npm test -- --run`（31 个测试文件，240 项测试）
+
+---
+
 # V2.0.2 发布说明
 
 V2.0.2 修复后端分页模式下的前端同步闪烁问题，版本标签为 `V2.0.2`，对应分支为 `V2.0.2`，并已发布至 [GitHub Releases](https://github.com/lin04-24/gpt_image_playground/releases/tag/V2.0.2)。

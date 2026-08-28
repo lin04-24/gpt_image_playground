@@ -64,6 +64,9 @@ export interface CustomProviderDefinition {
   poll?: CustomProviderPollMapping
 }
 
+/** 尺寸参数格式：ratio = 宽高比（如 2:3，默认），size = 像素尺寸（如 1024x1536） */
+export type SizeParamFormat = 'ratio' | 'size'
+
 export interface ApiProfile {
   id: string
   name: string
@@ -81,9 +84,11 @@ export interface ApiProfile {
   responseFormatB64Json?: boolean
   streamImages?: boolean
   streamPartialImages?: number
+  /** 发送请求时 size 参数的格式；缺省视为 ratio */
+  sizeParamFormat?: SizeParamFormat
   /** 服务商返回的模型清单；未拉取时为空，手动填写的 model 仍然有效 */
   models?: Array<{ id: string; enabled: boolean }>
-  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'reasoningEffort' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json' | 'streamImages' | 'streamPartialImages' | 'models'>>>>
+  providerDrafts?: Partial<Record<ApiProvider, Partial<Pick<ApiProfile, 'baseUrl' | 'model' | 'apiMode' | 'reasoningEffort' | 'codexCli' | 'apiProxy' | 'responseFormatB64Json' | 'streamImages' | 'streamPartialImages' | 'sizeParamFormat' | 'models'>>>>
 }
 
 export interface AppSettings {

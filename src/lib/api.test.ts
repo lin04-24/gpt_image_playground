@@ -104,7 +104,7 @@ describe('callImageApi', () => {
     const [, init] = fetchMock.mock.calls[0]
     const body = JSON.parse(String((init as RequestInit).body))
     expect(body.size).toBeUndefined()
-    expect(body.prompt).toBe('Generate at 1024x1024 resolution. prompt')
+    expect(body.prompt).toBe('Generate at 1:1 resolution. prompt')
   })
 
   it('sends aspect ratio for grok imagine models without sending size', async () => {
