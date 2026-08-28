@@ -1,3 +1,23 @@
+# V2.0.1 发布说明
+
+V2.0.1 修复后端分页模式下前端仍展示完整历史照片的问题，版本标签为 `V2.0.1`，对应分支为 `V2.0.1`，并已发布至 [GitHub Releases](https://github.com/lin04-24/gpt_image_playground/releases/tag/V2.0.1)。
+
+## 功能情况
+
+- 任务列表严格按服务端分页，每页最多 30 条，前端只渲染当前页。
+- 首屏和翻页请求期间不再展示 IndexedDB 中缓存的全量历史任务，避免分页失效或出现旧数据混杂。
+- 新建和重试任务的乐观更新遵守 30 条页大小限制。
+- 保持 PostgreSQL 对完整历史数据的提示词搜索、状态筛选和收藏夹筛选能力，以及页码、上一页、下一页导航。
+- 兼容旧 SQLite 快照分页接口的默认和最大页大小统一为 30 条。
+
+## 验证
+
+- `npm run build`
+- `npm test -- --run`（31 个测试文件，236 项测试）
+- `git diff --check`
+
+---
+
 # V1.0.0 发布说明
 
 本版本已发布至 [GitHub Releases](https://github.com/lin04-24/gpt_image_playground/releases/tag/V1.0.0)，并对应 `V1.0.0` 分支。

@@ -26,13 +26,19 @@ function snapshot(tasks) {
 }
 
 describe('cloud snapshot pagination', () => {
-  it('uses 20 tasks as the default bootstrap page size', () => {
-    const source = snapshot(Array.from({ length: 21 }, (_, index) => task(`task-${index}`, index)))
+  it('uses 30 tasks as the default bootstrap page size', () => {
+    const source = snapshot(Array.from({ length: 31 }, (_, index) => task(`task-${index}`, index)))
     const page = getCloudSnapshotPage(source, new URLSearchParams({ mode: 'bootstrap' }))
 
-    expect(page.page.tasks).toHaveLength(20)
-    expect(page.page.tasks[0].id).toBe('task-20')
+    expect(page.page.tasks).toHaveLength(30)
+    expect(page.page.tasks[0].id).toBe('task-30')
     expect(page.page.nextCursor).toEqual(expect.any(String))
+  })
+
+  it('rejects a requested page larger than 30 tasks', () => {
+    const page = getCloudSnapshotPage(snapshot([task('one', 1)]), new URLSearchParams({ mode: 'bootstrap', limit: '31' }))
+
+    expect(page).toEqual({ error: '分页参数无效', status: 400 })
   })
 
   it('sorts task pages stably and returns only image metadata referenced by the page', () => {
