@@ -31,8 +31,9 @@ export default function InputParamsPanel({
   outputCompressionInput,
   setOutputCompressionInput,
   commitOutputCompression,
-  moderationHint,
-  moderationDisabled,
+  batchInput,
+  commitBatch,
+  handleBatchInputChange,
   outputImageLimit,
   nInput,
   setNInputFocused,
@@ -68,8 +69,9 @@ export default function InputParamsPanel({
   outputCompressionInput: string
   setOutputCompressionInput: (value: string) => void
   commitOutputCompression: () => void
-  moderationHint: HintTooltipState
-  moderationDisabled: boolean
+  batchInput: string
+  commitBatch: () => void
+  handleBatchInputChange: (value: string) => void
   outputImageLimit: number
   nInput: string
   setNInputFocused: (focused: boolean) => void
@@ -220,34 +222,20 @@ export default function InputParamsPanel({
           />
         </label>
       )}
-      <label
-        className="relative flex flex-col gap-0.5"
-        onMouseEnter={moderationHint.show}
-        onMouseLeave={moderationHint.hide}
-        onTouchStart={moderationHint.startTouch}
-        onTouchEnd={moderationHint.clearTimer}
-        onTouchCancel={moderationHint.hide}
-        onClick={moderationHint.show}
-      >
-        <span className="text-gray-400 dark:text-gray-500 ml-1">审核</span>
-        <Select
-          value={moderationDisabled ? 'auto' : params.moderation}
-          onChange={(val) => {
-            if (!moderationDisabled) setParams({ moderation: val as TaskParams['moderation'] })
+      <label className="flex flex-col gap-0.5">
+        <span className="text-gray-400 dark:text-gray-500 ml-1">批次</span>
+        <input
+          value={batchInput}
+          onChange={(e) => handleBatchInputChange(e.target.value)}
+          onBlur={commitBatch}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur()
+            }
           }}
-          options={[
-            { label: 'auto', value: 'auto' },
-            { label: 'low', value: 'low' },
-          ]}
-          disabled={moderationDisabled}
-          showValueTooltips={false}
-          className={moderationDisabled
-            ? 'px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] bg-gray-100/50 dark:bg-white/[0.05] opacity-50 cursor-not-allowed text-xs transition-all duration-200 shadow-sm'
-            : selectClass}
-        />
-        <ButtonTooltip
-          visible={moderationDisabled && moderationHint.visible}
-          text="fal.ai 不支持审核参数"
+          min={1}
+          type="number"
+          className="px-3 py-1.5 rounded-xl border border-gray-200/60 dark:border-white/[0.08] focus:outline-none text-xs transition-all duration-200 shadow-sm bg-white/50 dark:bg-white/[0.03]"
         />
       </label>
       <label

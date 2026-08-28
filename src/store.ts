@@ -210,6 +210,8 @@ interface AppState {
   // 参数
   params: TaskParams
   setParams: (p: Partial<TaskParams>) => void
+  batchCount: number
+  setBatchCount: (n: number) => void
   reusedTaskApiProfileId: string | null
   reusedTaskApiProfileName: string | null
   reusedTaskApiProfileMissing: boolean
@@ -487,6 +489,8 @@ export const useStore = create<AppState>()(
       // Params
       params: { ...DEFAULT_PARAMS },
       setParams: (p) => set((s) => ({ params: { ...s.params, ...p } })),
+      batchCount: 1,
+      setBatchCount: (batchCount) => set({ batchCount }),
       reusedTaskApiProfileId: null,
       reusedTaskApiProfileName: null,
       reusedTaskApiProfileMissing: false,
@@ -1266,9 +1270,12 @@ async function submitTaskViaBackend(options: {
   useStore.getState().showToast('任务已提交', 'success')
 }
 
+/** 批次提交时相邻两次生图请求之间的间隔（毫秒） */
+const BATCH_REQUEST_DELAY_MS = 5
+
 /** 提交新任务 */
 export async function submitTask(options: { allowFullMask?: boolean; useCurrentApiProfileWhenReusedMissing?: boolean } = {}) {
-  const { settings, prompt, inputImages, maskDraft, params, reusedTaskApiProfileId, reusedTaskApiProfileName, reusedTaskApiProfileMissing, showToast, setConfirmDialog } =
+  const { settings, prompt, inputImages, maskDraft, params, batchCount, reusedTaskApiProfileId, reusedTaskApiProfileName, reusedTaskApiProfileMissing, showToast, setConfirmDialog } =
     useStore.getState()
 
   const normalizedSettings = normalizeSettings(settings)
@@ -1359,21 +1366,26 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
     useStore.getState().setParams(normalizedParamPatch)
   }
 
+  const requestCount = Math.max(1, Math.floor(batchCount))
+
   if (import.meta.env.VITE_BACKEND_API === 'true') {
     try {
-      await submitTaskViaBackend({
-        prompt: prompt.trim(),
-        params: taskParams,
-        inputImages: orderedInputImages,
-        maskDraft,
-        maskImageId,
-        maskTargetImageId,
-        activeProfile,
-        customProvider: normalizedSettings.customProviders.find((provider) => provider.id === activeProfile.provider),
-        allowPromptRewrite: requestSettings.allowPromptRewrite,
-        transparentOutput: transparentMeta?.transparentOutput,
-        transparentPrompt: transparentMeta?.effectivePrompt,
-      })
+      for (let i = 0; i < requestCount; i++) {
+        if (i > 0) await new Promise((resolve) => window.setTimeout(resolve, BATCH_REQUEST_DELAY_MS))
+        await submitTaskViaBackend({
+          prompt: prompt.trim(),
+          params: taskParams,
+          inputImages: orderedInputImages,
+          maskDraft,
+          maskImageId,
+          maskTargetImageId,
+          activeProfile,
+          customProvider: normalizedSettings.customProviders.find((provider) => provider.id === activeProfile.provider),
+          allowPromptRewrite: requestSettings.allowPromptRewrite,
+          transparentOutput: transparentMeta?.transparentOutput,
+          transparentPrompt: transparentMeta?.effectivePrompt,
+        })
+      }
       useStore.setState((state) => ({
         settings: {
           ...state.settings,
@@ -1388,49 +1400,54 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
         useStore.getState().clearInputImages()
       }
       useStore.getState().setReusedTaskApiProfile(null)
+      useStore.getState().showToast(requestCount > 1 ? `已提交 ${requestCount} 个生成任务` : '任务已提交', 'success')
     } catch (error) {
       showToast(error instanceof Error ? error.message : '后端任务提交失败', 'error')
     }
     return
   }
 
-  const taskId = genId()
-  const task: TaskRecord = {
-    id: taskId,
-    updatedAt: Date.now(),
-    prompt: prompt.trim(),
-    params: taskParams,
-    apiProvider: activeProfile.provider,
-    apiProfileId: activeProfile.id,
-    apiProfileName: activeProfile.name,
-    apiMode: activeProfile.apiMode,
-    apiModel: activeProfile.model,
-    inputImageIds: orderedInputImages.map((i) => i.id),
-    maskTargetImageId,
-    maskImageId,
-    transparentOutput: transparentMeta?.transparentOutput,
-    transparentPrompt: transparentMeta?.effectivePrompt,
-    outputImages: [],
-    status: 'running',
-    error: null,
-    createdAt: Date.now(),
-    finishedAt: null,
-    elapsed: null,
+  for (let i = 0; i < requestCount; i++) {
+    if (i > 0) await new Promise((resolve) => window.setTimeout(resolve, BATCH_REQUEST_DELAY_MS))
+    const taskId = genId()
+    const task: TaskRecord = {
+      id: taskId,
+      updatedAt: Date.now(),
+      prompt: prompt.trim(),
+      params: taskParams,
+      apiProvider: activeProfile.provider,
+      apiProfileId: activeProfile.id,
+      apiProfileName: activeProfile.name,
+      apiMode: activeProfile.apiMode,
+      apiModel: activeProfile.model,
+      inputImageIds: orderedInputImages.map((img) => img.id),
+      maskTargetImageId,
+      maskImageId,
+      transparentOutput: transparentMeta?.transparentOutput,
+      transparentPrompt: transparentMeta?.effectivePrompt,
+      outputImages: [],
+      status: 'running',
+      error: null,
+      createdAt: Date.now(),
+      finishedAt: null,
+      elapsed: null,
+    }
+
+    const latestTasks = useStore.getState().tasks
+    useStore.getState().setTasks([task, ...latestTasks])
+    await putTask(task)
+
+    // 异步调用 API
+    executeTask(taskId)
   }
 
-  const latestTasks = useStore.getState().tasks
-  useStore.getState().setTasks([task, ...latestTasks])
-  await putTask(task)
-  useStore.getState().showToast('任务已提交', 'success')
+  useStore.getState().showToast(requestCount > 1 ? `已提交 ${requestCount} 个生成任务` : '任务已提交', 'success')
 
   if (settings.clearInputAfterSubmit) {
     useStore.getState().setPrompt('')
     useStore.getState().clearInputImages()
   }
   useStore.getState().setReusedTaskApiProfile(null)
-
-  // 异步调用 API
-  executeTask(taskId)
 }
 
 async function executeTask(taskId: string) {

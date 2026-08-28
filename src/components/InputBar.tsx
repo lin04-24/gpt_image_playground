@@ -70,6 +70,8 @@ export default function InputBar() {
   const clearInputImages = useStore((s) => s.clearInputImages)
   const params = useStore((s) => s.params)
   const setParams = useStore((s) => s.setParams)
+  const batchCount = useStore((s) => s.batchCount)
+  const setBatchCount = useStore((s) => s.setBatchCount)
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
   const reusedTaskApiProfileId = useStore((s) => s.reusedTaskApiProfileId)
@@ -383,6 +385,7 @@ export default function InputBar() {
   )
   const [nInput, setNInput] = useState(String(params.n))
   const [nInputFocused, setNInputFocused] = useState(false)
+  const [batchInput, setBatchInput] = useState(String(batchCount))
   const dragCounter = useRef(0)
   const isMobile = useIsMobile()
 
@@ -427,7 +430,6 @@ export default function InputBar() {
   }, [setPrompt])
   const activeProvider = activeProfile.provider
   const isFalProvider = activeProvider === 'fal'
-  const moderationDisabled = isFalProvider
   const transparentOutputAvailable = true
   const showTransparentOutputControl = transparentOutputAvailable && params.output_format === 'png'
   const transparentOutputEnabled = transparentOutputAvailable && showTransparentOutputControl && params.transparent_output
@@ -463,7 +465,6 @@ export default function InputBar() {
     if (open) transparentOutputHint.hide()
   }, [transparentOutputHint.hide])
   const compressionHint = useHintTooltip({ enabled: () => compressionDisabled })
-  const moderationHint = useHintTooltip({ enabled: () => moderationDisabled })
   const sizeHint = useHintTooltip({ enabled: () => isFalTextToImage || activeProfile.codexCli })
   const qualityHint = useHintTooltip({ enabled: () => activeProfile.codexCli || isFalProvider })
   const nLimitHint = useHintTooltip({ autoHideMs: 2000 })
@@ -666,6 +667,14 @@ export default function InputBar() {
     preventDefault()
     showNLimitHint()
   }, [nInput, nInputFocused, outputImageLimit, params.n, showNLimitHint])
+
+  const commitBatch = useCallback(() => {
+    const nextValue = Number(batchInput)
+    const normalizedValue = batchInput.trim() === '' || Number.isNaN(nextValue) ? 1 : Math.floor(nextValue)
+    const clampedValue = Math.min(999, Math.max(1, normalizedValue))
+    setBatchInput(String(clampedValue))
+    setBatchCount(clampedValue)
+  }, [batchInput, setBatchCount])
 
   const clearImageHintTimer = () => {
     if (imageHintTimerRef.current != null) {
@@ -1447,8 +1456,9 @@ export default function InputBar() {
       outputCompressionInput={outputCompressionInput}
       setOutputCompressionInput={setOutputCompressionInput}
       commitOutputCompression={commitOutputCompression}
-      moderationHint={moderationHint}
-      moderationDisabled={moderationDisabled}
+      batchInput={batchInput}
+      commitBatch={commitBatch}
+      handleBatchInputChange={setBatchInput}
       outputImageLimit={outputImageLimit}
       nInput={nInput}
       setNInputFocused={setNInputFocused}
