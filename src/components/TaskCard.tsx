@@ -245,14 +245,11 @@ export default function TaskCard({
     return () => clearInterval(id)
   }, [task.customRecoverable, task.falRecoverable, task.status])
 
-  // 加载缩略图
+  // 加载缩略图。按图片 id 触发而非 outputImages 数组引用：后端同步会用新对象整体替换任务列表，
+  // 若按引用重跑会先把 thumbSrc 清空，导致整页缩略图集体闪烁一帧。
+  const coverImageId = task.outputImages?.[0] ?? ''
   useEffect(() => {
-    setCoverRatio('')
-    setCoverSize('')
-    setThumbSrc('')
-
     let cancelled = false
-    const imageId = task.outputImages?.[0]
     let unsubscribe: (() => void) | undefined
 
     const applyThumbnail = (thumbnail: { dataUrl: string; width?: number; height?: number }) => {
@@ -264,9 +261,13 @@ export default function TaskCard({
       }
     }
 
-    if (imageId) {
-      unsubscribe = subscribeImageThumbnail(imageId, applyThumbnail)
-      ensureImageThumbnailCached(imageId).then((thumbnail) => {
+    if (!coverImageId) {
+      setThumbSrc('')
+      setCoverRatio('')
+      setCoverSize('')
+    } else {
+      unsubscribe = subscribeImageThumbnail(coverImageId, applyThumbnail)
+      ensureImageThumbnailCached(coverImageId).then((thumbnail) => {
         if (cancelled || !thumbnail) return
         applyThumbnail(thumbnail)
       }).catch(() => {
@@ -278,14 +279,15 @@ export default function TaskCard({
       cancelled = true
       unsubscribe?.()
     }
-  }, [task.outputImages])
+  }, [coverImageId])
 
   const duration = (() => {
     let seconds: number
     if (task.status === 'running' || (task.status as string) === 'queued' || task.falRecoverable || task.customRecoverable) {
-      seconds = Math.floor((now - task.createdAt) / 1000)
+      // 后端模式的 createdAt 来自服务端时钟，可能略超前于本地时间，钳制为非负避免出现 -1:-1
+      seconds = Math.max(0, Math.floor((now - task.createdAt) / 1000))
     } else if (task.elapsed != null) {
-      seconds = Math.floor(task.elapsed / 1000)
+      seconds = Math.max(0, Math.floor(task.elapsed / 1000))
     } else {
       return '00:00'
     }
@@ -416,7 +418,7 @@ export default function TaskCard({
               )}
             </>
           )}
-          {task.status === 'running' && (!streamPreviewSrc || !streamPreviewLoaded) && (
+          {(task.status === 'running' || isQueued) && (!streamPreviewSrc || !streamPreviewLoaded) && (
             <div className="flex flex-col items-center gap-2">
               <svg
                 className="w-8 h-8 text-blue-400 animate-spin"
