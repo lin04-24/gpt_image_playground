@@ -1235,39 +1235,72 @@ async function submitTaskViaBackend(options: {
   transparentPrompt?: string
   customProvider?: unknown
 }) {
-  await upsertBackendProfile({ ...options.activeProfile, customProvider: options.customProvider })
-
-  const inputImageIds = [] as string[]
-  for (const image of options.inputImages) {
-    const uploaded = await uploadBackendImage(image.dataUrl, image.id)
-    inputImageIds.push(uploaded.id)
-  }
-
-  let maskImageId = options.maskImageId
-  if (maskImageId && options.maskDraft?.maskDataUrl) {
-    const uploaded = await uploadBackendImage(options.maskDraft.maskDataUrl, maskImageId)
-    maskImageId = uploaded.id
-  }
-
-  const task = await createBackendTask({
+  // 先插入本地排队占位任务：图片上传和建单请求耗时数秒，占位卡片让任务立即可见。
+  // 占位不写入 IndexedDB，提交失败或页面刷新都不会留下幽灵任务。
+  const placeholderId = `pending-${genId()}`
+  const placeholder: TaskRecord = {
+    id: placeholderId,
+    updatedAt: Date.now(),
     prompt: options.prompt,
     params: options.params,
+    apiProvider: options.activeProfile.provider,
     apiProfileId: options.activeProfile.id,
-    provider: options.activeProfile.provider,
-    apiMode: options.activeProfile.apiMode,
-    model: options.activeProfile.model,
     apiProfileName: options.activeProfile.name,
-    allowPromptRewrite: options.allowPromptRewrite,
-    inputImageIds,
-    maskImageId,
+    apiMode: options.activeProfile.apiMode,
+    apiModel: options.activeProfile.model,
+    inputImageIds: options.inputImages.map((img) => img.id),
     maskTargetImageId: options.maskTargetImageId,
+    maskImageId: options.maskImageId,
     transparentOutput: options.transparentOutput,
     transparentPrompt: options.transparentPrompt,
-  })
-  const currentTasks = useStore.getState().tasks
-  useStore.getState().setTasks([task, ...currentTasks.filter((item) => item.id !== task.id)].slice(0, BACKEND_PAGE_SIZE))
-  await putTask(task)
-  useStore.getState().showToast('任务已提交', 'success')
+    outputImages: [],
+    status: 'queued',
+    error: null,
+    createdAt: Date.now(),
+    finishedAt: null,
+    elapsed: null,
+  }
+  useStore.getState().setTasks([placeholder, ...useStore.getState().tasks].slice(0, BACKEND_PAGE_SIZE))
+
+  try {
+    await upsertBackendProfile({ ...options.activeProfile, customProvider: options.customProvider })
+
+    const inputImageIds = [] as string[]
+    for (const image of options.inputImages) {
+      const uploaded = await uploadBackendImage(image.dataUrl, image.id)
+      inputImageIds.push(uploaded.id)
+    }
+
+    let maskImageId = options.maskImageId
+    if (maskImageId && options.maskDraft?.maskDataUrl) {
+      const uploaded = await uploadBackendImage(options.maskDraft.maskDataUrl, maskImageId)
+      maskImageId = uploaded.id
+    }
+
+    const task = await createBackendTask({
+      prompt: options.prompt,
+      params: options.params,
+      apiProfileId: options.activeProfile.id,
+      provider: options.activeProfile.provider,
+      apiMode: options.activeProfile.apiMode,
+      model: options.activeProfile.model,
+      apiProfileName: options.activeProfile.name,
+      allowPromptRewrite: options.allowPromptRewrite,
+      inputImageIds,
+      maskImageId,
+      maskTargetImageId: options.maskTargetImageId,
+      transparentOutput: options.transparentOutput,
+      transparentPrompt: options.transparentPrompt,
+    })
+    const currentTasks = useStore.getState().tasks
+    useStore.getState().setTasks([task, ...currentTasks.filter((item) => item.id !== task.id && item.id !== placeholderId)].slice(0, BACKEND_PAGE_SIZE))
+    await putTask(task)
+    useStore.getState().showToast('任务已提交', 'success')
+  } catch (error) {
+    // 提交失败时移除占位卡片，错误交由调用方提示
+    useStore.getState().setTasks(useStore.getState().tasks.filter((item) => item.id !== placeholderId))
+    throw error
+  }
 }
 
 /** 批次提交时相邻两次生图请求之间的间隔（毫秒） */
@@ -1348,9 +1381,10 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
     }
   }
 
-  // 持久化输入图片到 IndexedDB（此前只在内存缓存中）
+  // 输入图在添加时已写入 IndexedDB（见 createInputImageFromFile / addImageFromUrl）。
+  // 这里只做异步兜底补写，不再阻塞等待——否则大图哈希+读写会让任务卡片延迟数秒才出现。
   for (const img of orderedInputImages) {
-    await storeImage(img.dataUrl)
+    void storeImage(img.dataUrl).catch(() => {})
   }
 
   const normalizedParams = normalizeParamsForSettings(params, requestSettings, { hasInputImages: orderedInputImages.length > 0 })

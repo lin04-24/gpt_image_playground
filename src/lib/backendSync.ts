@@ -93,7 +93,14 @@ export async function synchronizeBackendData(page = pageState.page) {
       await synchronizeBackendData(result.totalPages)
       return
     }
-    useStore.setState({ tasks: result.tasks, selectedTaskIds: [] })
+    // 内容未变化的任务保留原对象引用，避免每次 SSE 事件都让整列表重渲染造成闪烁
+    const prevTasks = useStore.getState().tasks
+    const prevById = new Map(prevTasks.map((task) => [task.id, task]))
+    const tasks = result.tasks.map((task) => {
+      const prev = prevById.get(task.id)
+      return prev && JSON.stringify(prev) === JSON.stringify(task) ? prev : task
+    })
+    useStore.setState({ tasks, selectedTaskIds: [] })
     await Promise.all(result.tasks.map((task) => putTask(task)))
     if (requestController !== controller) return
     setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '', initialized: true })
