@@ -34,6 +34,27 @@ const initialPage = typeof window === 'undefined'
 const backendModeEnabled = import.meta.env.VITE_BACKEND_API === 'true'
 let pageState: BackendPageState = { page: initialPage, pageSize: BACKEND_PAGE_SIZE, totalTasks: 0, totalPages: 0, loading: backendModeEnabled, error: '', initialized: false }
 
+// 同步失败后的自动重试间隔（毫秒），覆盖容器重建/服务重启期间的接口不可用窗口
+const RETRY_DELAYS = [2000, 4000, 8000, 15000, 30000]
+let retryTimer: number | null = null
+let retryAttempt = 0
+
+function clearSyncRetry() {
+  if (retryTimer) window.clearTimeout(retryTimer)
+  retryTimer = null
+  retryAttempt = 0
+}
+
+function scheduleSyncRetry() {
+  if (retryTimer || !backendModeEnabled) return
+  const delay = RETRY_DELAYS[Math.min(retryAttempt, RETRY_DELAYS.length - 1)]
+  retryAttempt += 1
+  retryTimer = window.setTimeout(() => {
+    retryTimer = null
+    void synchronizeBackendData().catch((error) => console.warn('Backend sync retry failed:', error))
+  }, delay)
+}
+
 function setPageState(patch: Partial<BackendPageState>) {
   pageState = { ...pageState, ...patch }
   listeners.forEach((listener) => listener())
@@ -103,6 +124,7 @@ export async function synchronizeBackendData(page = pageState.page) {
     useStore.setState({ tasks, selectedTaskIds: [] })
     await Promise.all(result.tasks.map((task) => putTask(task)))
     if (requestController !== controller) return
+    clearSyncRetry()
     setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '', initialized: true })
   } catch (error) {
     if (controller.signal.aborted || requestController !== controller) return
@@ -110,6 +132,8 @@ export async function synchronizeBackendData(page = pageState.page) {
     setPageState({ loading: false, error: error instanceof Error ? error.message : '读取任务失败', initialized: true })
     // 首次同步失败时清掉本地缓存，防止把 IndexedDB 里的全量旧历史当作当前列表展示
     if (firstAttempt) useStore.setState({ tasks: [], selectedTaskIds: [] })
+    // 容器重建等场景下接口可能暂时不可用；不自动重试的话列表会一直为空，直到手动切换筛选才触发重新同步
+    scheduleSyncRetry()
   }
 }
 
@@ -299,6 +323,7 @@ export function stopBackendSync() {
   requestController?.abort()
   requestController = null
   browserMigrationPromise = null
+  clearSyncRetry()
   if (filterTimer) window.clearTimeout(filterTimer)
   filterTimer = null
   if (profileTimer) window.clearTimeout(profileTimer)
