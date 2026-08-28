@@ -24,13 +24,15 @@ export interface BackendPageState {
   totalPages: number
   loading: boolean
   error: string
+  /** 是否已完成首次同步；完成前不渲染本地缓存任务，避免闪现 IndexedDB 里的全量旧数据 */
+  initialized: boolean
 }
 
 const initialPage = typeof window === 'undefined'
   ? 1
   : Math.max(1, Math.trunc(Number(new URLSearchParams(window.location.search).get('page'))) || 1)
 const backendModeEnabled = import.meta.env.VITE_BACKEND_API === 'true'
-let pageState: BackendPageState = { page: initialPage, pageSize: BACKEND_PAGE_SIZE, totalTasks: 0, totalPages: 0, loading: backendModeEnabled, error: '' }
+let pageState: BackendPageState = { page: initialPage, pageSize: BACKEND_PAGE_SIZE, totalTasks: 0, totalPages: 0, loading: backendModeEnabled, error: '', initialized: false }
 
 function setPageState(patch: Partial<BackendPageState>) {
   pageState = { ...pageState, ...patch }
@@ -82,8 +84,6 @@ export async function synchronizeBackendData(page = pageState.page) {
   const controller = new AbortController()
   requestController = controller
   setPageState({ page, loading: true, error: '' })
-  // 后端分页是当前画廊的唯一可见数据集，避免请求期间继续展示本地全量缓存。
-  useStore.setState({ tasks: [], selectedTaskIds: [] })
   updateUrl(page)
   try {
     if (browserMigrationPromise) await browserMigrationPromise
@@ -96,10 +96,13 @@ export async function synchronizeBackendData(page = pageState.page) {
     useStore.setState({ tasks: result.tasks, selectedTaskIds: [] })
     await Promise.all(result.tasks.map((task) => putTask(task)))
     if (requestController !== controller) return
-    setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '' })
+    setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '', initialized: true })
   } catch (error) {
     if (controller.signal.aborted || requestController !== controller) return
-    setPageState({ loading: false, error: error instanceof Error ? error.message : '读取任务失败' })
+    const firstAttempt = !pageState.initialized
+    setPageState({ loading: false, error: error instanceof Error ? error.message : '读取任务失败', initialized: true })
+    // 首次同步失败时清掉本地缓存，防止把 IndexedDB 里的全量旧历史当作当前列表展示
+    if (firstAttempt) useStore.setState({ tasks: [], selectedTaskIds: [] })
   }
 }
 
@@ -297,7 +300,7 @@ export function stopBackendSync() {
   appStateTimer = null
   if (shouldFlushAppState) void pushBackendAppState().catch((error) => console.warn('Backend app state flush failed:', error))
   hydratingState = false
-  setPageState({ loading: backendModeEnabled, error: '' })
+  setPageState({ loading: backendModeEnabled, error: '', initialized: false })
   setRemoteImageLoader(undefined)
   setRemoteImageThumbnailLoader(undefined)
 }
