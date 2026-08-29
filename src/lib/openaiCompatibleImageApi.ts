@@ -412,9 +412,18 @@ async function parseResponsesApiStreamResponse(
 export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile: ApiProfile, customProvider?: CustomProviderDefinition | null): Promise<CallApiResult> {
   // 在入口统一按配置转换 size 格式，responses/images/自定义服务商模板三条路径都从这里取参数
   const size = convertSizeParamFormat(opts.params.size, profile.sizeParamFormat ?? 'ratio')
-  const requestOpts = size === opts.params.size
+  const baseOpts = size === opts.params.size
     ? opts
     : { ...opts, params: { ...opts.params, size } }
+
+  // 编辑请求走 multipart 上传时输入图/遮罩 Blob 只转换一次，并发 n 路复用，避免同一张大图被重复解码编码
+  const requestOpts = usesMultipartInputBlobs(profile, customProvider, baseOpts.inputImageDataUrls.length > 0)
+    ? {
+        ...baseOpts,
+        inputImageBlobs: await convertInputImagesToBlobs(baseOpts),
+        ...(baseOpts.maskDataUrl ? { maskBlob: await maskDataUrlToPngBlob(baseOpts.maskDataUrl) } : {}),
+      }
+    : baseOpts
 
   if (customProvider) {
     return callCustomHttpImageApi(requestOpts, profile, customProvider)
@@ -457,6 +466,26 @@ async function callApiTaskWithRetry(task: () => Promise<CallApiResult>): Promise
     await new Promise((resolve) => setTimeout(resolve, delayMs))
     return task()
   }
+}
+
+/** 编辑请求是否需要把输入图转成 Blob 上传（images multipart / 自定义 multipart 模板） */
+function usesMultipartInputBlobs(profile: ApiProfile, customProvider: CustomProviderDefinition | null | undefined, isEdit: boolean): boolean {
+  if (!isEdit) return false
+  if (customProvider) {
+    const submitMapping = customProvider.editSubmit ?? customProvider.submit
+    return (submitMapping.contentType ?? 'json') === 'multipart'
+  }
+  return profile.apiMode === 'images'
+}
+
+/** 输入图 data URL 转上传 Blob；有遮罩时第一张必须转成 PNG 以保证与遮罩对齐 */
+async function convertInputImagesToBlobs(opts: CallApiOptions): Promise<Blob[]> {
+  const blobs: Blob[] = []
+  for (let i = 0; i < opts.inputImageDataUrls.length; i++) {
+    const dataUrl = opts.inputImageDataUrls[i]
+    blobs.push(opts.maskDataUrl && i === 0 ? await imageDataUrlToPngBlob(dataUrl) : await dataUrlToBlob(dataUrl))
+  }
+  return blobs
 }
 
 /** 有界并发池：同时最多 limit 个任务在跑，完成一个补一个，结果按提交顺序排列 */
@@ -596,16 +625,9 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
         formData.append('partial_images', String(getStreamPartialImages(profile)))
       }
 
-      const imageBlobs: Blob[] = []
-      for (let i = 0; i < inputImageDataUrls.length; i++) {
-        const dataUrl = inputImageDataUrls[i]
-        const blob = opts.maskDataUrl && i === 0
-          ? await imageDataUrlToPngBlob(dataUrl)
-          : await dataUrlToBlob(dataUrl)
-        imageBlobs.push(blob)
-      }
+      const imageBlobs = opts.inputImageBlobs ?? (await convertInputImagesToBlobs(opts))
 
-      const maskBlob = opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
+      const maskBlob = opts.maskDataUrl ? (opts.maskBlob ?? (await maskDataUrlToPngBlob(opts.maskDataUrl))) : null
       if (opts.maskDataUrl) {
         assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
         assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)
@@ -785,15 +807,12 @@ async function createCustomMultipartBody(mapping: CustomProviderSubmitMapping, o
 
   const needsInputImages = mapping.files?.some((file) => file.source === 'inputImages')
   const needsMask = mapping.files?.some((file) => file.source === 'mask')
-  const imageBlobs: Blob[] = []
-  if (needsInputImages) {
-    for (let i = 0; i < opts.inputImageDataUrls.length; i++) {
-      const dataUrl = opts.inputImageDataUrls[i]
-      const blob = opts.maskDataUrl && i === 0 ? await imageDataUrlToPngBlob(dataUrl) : await dataUrlToBlob(dataUrl)
-      imageBlobs.push(blob)
-    }
-  }
-  const maskBlob = needsMask && opts.maskDataUrl ? await maskDataUrlToPngBlob(opts.maskDataUrl) : null
+  const imageBlobs = needsInputImages
+    ? opts.inputImageBlobs ?? (await convertInputImagesToBlobs(opts))
+    : []
+  const maskBlob = needsMask && opts.maskDataUrl
+    ? opts.maskBlob ?? (await maskDataUrlToPngBlob(opts.maskDataUrl))
+    : null
   if (opts.maskDataUrl && (needsInputImages || needsMask)) {
     assertMaskEditFileSize('遮罩主图文件', imageBlobs[0]?.size ?? 0)
     assertMaskEditFileSize('遮罩文件', maskBlob?.size ?? 0)

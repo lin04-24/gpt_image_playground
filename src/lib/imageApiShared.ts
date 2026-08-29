@@ -17,7 +17,11 @@ export interface CallApiOptions {
   params: TaskParams
   /** 输入图片的 data URL 列表 */
   inputImageDataUrls: string[]
+  /** 预转换好的输入图 Blob，与 inputImageDataUrls 一一对应；并发 n 路时复用，避免同一张图重复解码编码 */
+  inputImageBlobs?: Blob[]
   maskDataUrl?: string
+  /** 预转换好的遮罩 Blob，作用同 inputImageBlobs */
+  maskBlob?: Blob
   skipCodexCliSizePrompt?: boolean
   onFalRequestEnqueued?: (request: { requestId: string; endpoint: string }) => void
   onCustomTaskEnqueued?: (task: { taskId: string }) => void
