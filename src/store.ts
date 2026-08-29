@@ -759,13 +759,20 @@ export function taskMatchesFilterStatus(task: TaskRecord, filterStatus: AppState
   return task.status === filterStatus
 }
 
+// 任务更新时以新对象替换（{ ...t, ...patch }），按引用缓存小写搜索串即可随更新自然失效
+const taskSearchTextCache = new WeakMap<TaskRecord, string>()
+
 export function taskMatchesSearchQuery(task: TaskRecord, query: string) {
   const q = query.trim().toLowerCase()
   if (!q) return true
-  const prompt = (task.prompt || '').toLowerCase()
-  const paramStr = JSON.stringify(task.params).toLowerCase()
-  const errorStr = [task.error, ...(task.outputErrors ?? []).map((item) => item.error)].filter(Boolean).join('\n').toLowerCase()
-  return prompt.includes(q) || paramStr.includes(q) || errorStr.includes(q)
+  let text = taskSearchTextCache.get(task)
+  if (text === undefined) {
+    const errorStr = [task.error, ...(task.outputErrors ?? []).map((item) => item.error)].filter(Boolean).join('\n')
+    // 分隔用 '\n'，搜索框是单行输入且 query 经过 trim，q 不可能包含 '\n'，拼接后 includes 与分段匹配等价
+    text = `${task.prompt || ''}\n${JSON.stringify(task.params)}\n${errorStr}`.toLowerCase()
+    taskSearchTextCache.set(task, text)
+  }
+  return text.includes(q)
 }
 
 export function showCodexCliPrompt(force = false, reason = '接口返回的提示词已被改写') {
