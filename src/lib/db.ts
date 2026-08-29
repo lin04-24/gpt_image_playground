@@ -19,8 +19,12 @@ const SMALL_THUMBNAIL_VERSION = 1
 export const CURRENT_THUMBNAIL_VERSION = THUMBNAIL_VERSION
 export const CURRENT_SMALL_THUMBNAIL_VERSION = SMALL_THUMBNAIL_VERSION
 
+// 复用同一连接，避免每次读写都重新 openDB
+let dbPromise: Promise<IDBDatabase> | null = null
+
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise
+  dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = (e) => {
       const db = (e.target as IDBOpenDBRequest).result
@@ -37,9 +41,25 @@ function openDB(): Promise<IDBDatabase> {
         db.createObjectStore(STORE_SMALL_THUMBNAILS, { keyPath: 'id' })
       }
     }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
+    req.onsuccess = () => {
+      const db = req.result
+      // 其他标签页请求升级版本时让出连接，并重置缓存供下次重开
+      db.onversionchange = () => {
+        db.close()
+        dbPromise = null
+      }
+      // 连接意外关闭后重置，后续操作可重新打开
+      db.onclose = () => {
+        dbPromise = null
+      }
+      resolve(db)
+    }
+    req.onerror = () => {
+      dbPromise = null
+      reject(req.error)
+    }
   })
+  return dbPromise
 }
 
 function dbTransaction<T>(
