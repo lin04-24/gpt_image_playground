@@ -137,6 +137,7 @@ async function applyLegacy(legacy) {
       await database.query('INSERT INTO task_favorite_collections (task_id, collection_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [task.id, collectionId])
     }
   }
+  if (importedTasks > 0) await database.query('UPDATE app_meta SET task_list_revision = task_list_revision + 1, updated_at = now() WHERE id = 1')
   await database.close()
   return { ...countSummary(legacy), importedImages, importedTasks }
 }
