@@ -92,8 +92,8 @@ function TaskCard({
   const swipeFrameRef = useRef<number | null>(null)
   const spotlightPointRef = useRef<{ x: number; y: number } | null>(null)
   const spotlightFrameRef = useRef<number | null>(null)
-  // 占位任务替换为服务端任务时可能重新挂载，用页面时钟相位让光环接续当前进度
-  const beamAnimationDelayRef = useRef(`${-(Date.now() % 3000)}ms`)
+  // 使用任务创建时间固定动画相位，避免不同任务共享当前页面时钟
+  const beamAnimationDelayRef = useRef(`${-(task.createdAt % 3000)}ms`)
 
   const updateSwipeDirection = (nextDirection: -1 | 0 | 1) => {
     if (swipeDirectionRef.current === nextDirection) return

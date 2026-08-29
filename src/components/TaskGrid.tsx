@@ -58,9 +58,10 @@ export default function TaskGrid() {
   }, [backendEnabled, backendPage.initialized, backendPage.pageSize, tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId, defaultFavoriteCollectionId])
 
   const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
+  const taskOrderKey = useMemo(() => filteredTasks.map((task) => task.id).join('\0'), [filteredTasks])
 
   // 筛选/网格重组时卡片平滑飞入新位置（系统减少动态效果模式下优雅降级）
-  useGridLayoutTransition(gridRef, animateLayout, filteredTasks)
+  useGridLayoutTransition(gridRef, animateLayout, taskOrderKey)
 
   // 稳定回调：TaskCard 已 memo，这里必须保证引用不变才能跳过无关卡片重渲染
   const handleCardClick = useCallback((task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {

@@ -8,7 +8,7 @@ const MAX_ENTER_STAGGER = 120
 
 // 网格重排动画（FLIP）：布局更新前记录各卡片坐标，更新后先反向位移再过渡回新位置，
 // 让筛选/新增任务时卡片平滑飞入新槽位而不是突兀闪现。
-// dep 是触发重排的数据引用（如筛选后的任务数组），内容变化但坐标未变的渲染不会产生动画。
+// dep 是触发重排的任务顺序签名；任务状态或内容更新但顺序未变时不会产生动画。
 export function useGridLayoutTransition(containerRef: RefObject<HTMLElement | null>, enabled: boolean, dep: unknown) {
   // key 为任务 id；用页面坐标（含滚动偏移）避免仅滚动导致的假位移
   const positionsRef = useRef<Map<string, { left: number; top: number }>>(new Map())
