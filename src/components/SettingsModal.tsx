@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { normalizeBaseUrl } from '../lib/api'
 import { fetchProviderModels } from '../lib/modelApi'
@@ -161,6 +161,9 @@ export default function SettingsModal() {
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [showApiKey, setShowApiKey] = useState(false)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
+  // 关闭时菜单先播退出动画再卸载
+  const [profileMenuClosing, setProfileMenuClosing] = useState(false)
+  const profileMenuWasOpenRef = useRef(false)
   const [profileMenuMaxHeight, setProfileMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
   const [showCustomProviderImport, setShowCustomProviderImport] = useState(false)
   const [showZipDownloadRouteManager, setShowZipDownloadRouteManager] = useState(false)
@@ -319,6 +322,19 @@ export default function SettingsModal() {
   useEffect(() => {
     if (defaultConfigOnly) setShowProfileMenu(false)
   }, [defaultConfigOnly])
+
+  useEffect(() => {
+    if (showProfileMenu) {
+      profileMenuWasOpenRef.current = true
+      setProfileMenuClosing(false)
+      return
+    }
+    if (!profileMenuWasOpenRef.current) return
+    profileMenuWasOpenRef.current = false
+    setProfileMenuClosing(true)
+    const timer = setTimeout(() => setProfileMenuClosing(false), 200)
+    return () => clearTimeout(timer)
+  }, [showProfileMenu])
 
   useEffect(() => () => {
     if (profileImportUrlTooltipTimerRef.current != null) window.clearTimeout(profileImportUrlTooltipTimerRef.current)
@@ -1252,10 +1268,10 @@ export default function SettingsModal() {
                       <ChevronDownIcon className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
                     </button>
                     
-                    {showProfileMenu && !defaultConfigOnly && (
+                    {(showProfileMenu || profileMenuClosing) && !defaultConfigOnly && (
                       <>
                         <div
-                          className="absolute right-0 top-full z-50 mt-1.5 w-full overflow-hidden overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl animate-dropdown-down dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 custom-scrollbar"
+                          className={`absolute right-0 top-full z-50 mt-1.5 w-full overflow-hidden overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 custom-scrollbar ${showProfileMenu ? 'animate-dropdown-down' : 'pointer-events-none animate-dropdown-down-out'}`}
                           style={{ maxHeight: profileMenuMaxHeight }}
                         >
                           <button
@@ -1264,7 +1280,8 @@ export default function SettingsModal() {
                               e.preventDefault()
                               createNewProfile()
                             }}
-                            className="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
+                            className="select-menu-item flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
+                            style={{ '--stagger-i': 0 } as CSSProperties}
                           >
                             <span className="truncate font-semibold">创建新配置</span>
                             <span className="flex h-5 w-5 shrink-0 items-center justify-center">
@@ -1272,11 +1289,12 @@ export default function SettingsModal() {
                             </span>
                           </button>
                           <div>
-                            {draft.profiles.map(profile => (
+                            {draft.profiles.map((profile, profileIdx) => (
                               <div
                                 key={profile.id}
                                 data-profile-id={profile.id}
                                 title={profile.name}
+                                style={{ '--stagger-i': Math.min(profileIdx + 1, 6) } as CSSProperties}
                                 draggable
                                 onDragStart={(e) => handleProfileDragStart(e, profile.id)}
                                 onDragOver={(e) => handleProfileDragOver(e, profile.id)}
@@ -1292,7 +1310,7 @@ export default function SettingsModal() {
                                   e.preventDefault()
                                   switchProfile(profile.id)
                                 }}
-                                className={`relative group flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-xs transition-colors ${draggedProfileId === profile.id ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]' : profile.id === activeProfile.id ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'}`}
+                                className={`select-menu-item relative group flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-xs transition-colors ${draggedProfileId === profile.id ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]' : profile.id === activeProfile.id ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'}`}
                               >
                                 {dragOverProfileId === profile.id && dragDropPosition === 'before' && draggedProfileId !== profile.id && (
                                   <div className="absolute -top-[1px] left-0 right-0 h-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
