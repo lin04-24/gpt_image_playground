@@ -212,7 +212,9 @@ html.reduce-motion .border-beam-overlay {
 }
 
 .task-card:hover .spotlight-border-layer,
-.task-card:hover .spotlight-glow-layer {
+.task-card:hover .spotlight-glow-layer,
+.detail-modal-panel:hover .spotlight-border-layer,
+.detail-modal-panel:hover .spotlight-glow-layer {
   opacity: 1;
 }
 
