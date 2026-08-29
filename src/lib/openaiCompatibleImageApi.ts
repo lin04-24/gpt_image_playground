@@ -425,6 +425,60 @@ export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile
     : callImagesApi(requestOpts, profile)
 }
 
+/** 并发请求上限：HTTP/1.1 下浏览器对同域约只有 6 个连接，超出的请求只会排队 */
+const IMAGE_API_CONCURRENCY_LIMIT = 6
+const IMAGE_API_RETRY_BASE_DELAY_MS = 1000
+
+/** 在错误对象上记录 HTTP 状态码，供并发路径判断是否可自动重试 */
+function createHttpError(message: string, status: number): Error {
+  const err = new Error(message)
+  ;(err as { httpStatus?: number }).httpStatus = status
+  return err
+}
+
+function isRetryableHttpError(err: unknown): boolean {
+  const status = (err as { httpStatus?: number } | null)?.httpStatus
+  return typeof status === 'number' && isRetryablePollingStatus(status)
+}
+
+function getRetryDelayMs(retryAttempt: number): number {
+  // 指数退避加随机抖动，避免多个槽位同时失败后集中在同一时刻重试
+  return Math.round(IMAGE_API_RETRY_BASE_DELAY_MS * 2 ** retryAttempt * (0.5 + Math.random()))
+}
+
+/** 对 408/429/5xx 自动重试一次；重试等待期间占用并发槽位，相当于对被限流的 host 保持背压 */
+async function callApiTaskWithRetry(task: () => Promise<CallApiResult>): Promise<CallApiResult> {
+  try {
+    return await task()
+  } catch (err) {
+    if (!isRetryableHttpError(err)) throw err
+    const delayMs = getRetryDelayMs(0)
+    console.warn(`图片请求失败（${getErrorMessage(err)}），${delayMs}ms 后自动重试一次`)
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+    return task()
+  }
+}
+
+/** 有界并发池：同时最多 limit 个任务在跑，完成一个补一个，结果按提交顺序排列 */
+async function runBoundedConcurrent<T>(tasks: Array<() => Promise<T>>, limit: number): Promise<Array<PromiseSettledResult<T>>> {
+  const results: Array<PromiseSettledResult<T>> = new Array(tasks.length)
+  let nextIndex = 0
+
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (nextIndex < tasks.length) {
+      const index = nextIndex
+      nextIndex += 1
+      try {
+        results[index] = { status: 'fulfilled', value: await tasks[index]() }
+      } catch (err) {
+        results[index] = { status: 'rejected', reason: err }
+      }
+    }
+  }))
+
+  return results
+}
+
 async function callImagesApi(opts: CallApiOptions, profile: ApiProfile): Promise<CallApiResult> {
   const n = opts.params.n > 0 ? opts.params.n : 1
   if ((profile.codexCli || (profile.streamImages && n > 1)) && n > 1) {
@@ -443,13 +497,14 @@ async function callImagesApiConcurrent(opts: CallApiOptions, profile: ApiProfile
       ...(profile.codexCli ? { quality: 'auto' as const } : {}),
     },
   }
-  const results = await Promise.allSettled(
-    Array.from({ length: n }).map((_, requestIndex) => callImagesApiSingle({
+  const results = await runBoundedConcurrent(
+    Array.from({ length: n }).map((_, requestIndex) => () => callApiTaskWithRetry(() => callImagesApiSingle({
       ...singleOpts,
       onPartialImage: opts.onPartialImage
         ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
         : undefined,
-    }, profile)),
+    }, profile))),
+    IMAGE_API_CONCURRENCY_LIMIT,
   )
 
   const successfulResults = results
@@ -623,7 +678,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
 
     if (!response.ok) {
       const errorMessage = await getApiErrorMessage(response)
-      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
+      throw createHttpError(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages), response.status)
     }
 
     if (profile.streamImages && isEventStreamResponse(response)) {
@@ -944,13 +999,15 @@ async function callResponsesImageApi(opts: CallApiOptions, profile: ApiProfile):
     return callResponsesImageApiSingle(opts, profile)
   }
 
-  const promises = Array.from({ length: n }).map((_, requestIndex) => callResponsesImageApiSingle({
-    ...opts,
-    onPartialImage: opts.onPartialImage
-      ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
-      : undefined,
-  }, profile))
-  const results = await Promise.allSettled(promises)
+  const results = await runBoundedConcurrent(
+    Array.from({ length: n }).map((_, requestIndex) => () => callApiTaskWithRetry(() => callResponsesImageApiSingle({
+      ...opts,
+      onPartialImage: opts.onPartialImage
+        ? (partial) => opts.onPartialImage?.({ ...partial, requestIndex })
+        : undefined,
+    }, profile))),
+    IMAGE_API_CONCURRENCY_LIMIT,
+  )
   
   const successfulResults = results
     .filter((r): r is PromiseFulfilledResult<CallApiResult> => r.status === 'fulfilled')
@@ -1035,7 +1092,7 @@ async function callResponsesImageApiSingle(opts: CallApiOptions, profile: ApiPro
 
     if (!response.ok) {
       const errorMessage = await getApiErrorMessage(response)
-      throw new Error(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages))
+      throw createHttpError(maybeAppendStreamingHint(errorMessage, response.status, profile.streamImages), response.status)
     }
 
     if (profile.streamImages && isEventStreamResponse(response)) {
