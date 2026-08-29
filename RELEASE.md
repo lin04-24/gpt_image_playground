@@ -1,3 +1,20 @@
+# V2.3.3（2026-08-29）
+
+### 性能
+- 任务网格三项渲染优化，显著降低长列表与框选时的卡顿：
+  - `TaskCard` 增加 `React.memo`，回调改为稳定引用（由卡片调用时携带 task 派发，`onReuse`/`onEditOutputs` 直接复用模块级 action，点击与删除回调 `useCallback` 固化）。此前框选每次 `mousemove` 触发 `setSelectedTaskIds` 会导致全部卡片重渲染，现在只有选中状态真正变化的卡片才会重渲染。
+  - 框选命中计算（`querySelectorAll` + 逐卡 `getBoundingClientRect` + `setState`）改为 `requestAnimationFrame` 每帧合并执行一次；`mousemove`/`scroll` 高频事件里只记录最新坐标。松开鼠标时同步执行挂起的最后一帧，快速拖放不会丢失末次命中；框未扫过新卡片时跳过 store 写入，避免无效的全列表渲染。
+  - 选中集合改为 `useMemo` 派生的 `Set` 做成员判断，替代原来对每张卡片执行 `Array.includes` 的 O(n²) 开销。
+- `.task-card-wrapper` 增加 `content-visibility: auto` + `contain-intrinsic-size`，浏览器跳过视口外卡片的渲染与布局，长列表滚动更流畅（已知取舍：远离视口的卡片在框选时返回估算矩形，滚动到可视区后自动校正）。
+
+### 功能情况
+- 交互行为不变：框选、Ctrl/⌘ 点选、触屏侧滑、点击打开详情、按钮操作等均与原实现一致。
+- 未修改数据库结构（DB_VERSION 仍为 5）、云同步接口或 README，升级无需任何迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（32 个测试文件，248 项测试）。
+
 # V2.3.2（2026-08-29）
 
 ### 性能
