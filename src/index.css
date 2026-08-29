@@ -232,6 +232,7 @@ html.reduce-motion *,
 html.reduce-motion *::before,
 html.reduce-motion *::after {
   animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
   scroll-behavior: auto !important;
@@ -376,23 +377,56 @@ input[type="number"] {
   overflow: hidden;
 }
 
-/* 下拉菜单：向下展开 */
+/* 下拉菜单：向下展开（参考 FAB 岛的弹性膨胀形变） */
 @keyframes dropdown-down {
-  from { opacity: 0; transform: scaleY(0.9) translateY(-4px); }
-  to   { opacity: 1; transform: scaleY(1) translateY(0); }
+  from { opacity: 0; transform: scale(0.6) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 /* 下拉菜单：向上展开 */
 @keyframes dropdown-up {
-  from { opacity: 0; transform: scaleY(0.9) translateY(4px); }
-  to   { opacity: 1; transform: scaleY(1) translateY(0); }
+  from { opacity: 0; transform: scale(0.6) translateY(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 .animate-dropdown-down {
   transform-origin: top center;
-  animation: dropdown-down 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: dropdown-down 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .animate-dropdown-up {
   transform-origin: bottom center;
-  animation: dropdown-up 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: dropdown-up 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* 收起动画：与展开反向，播完由组件卸载菜单 */
+@keyframes dropdown-down-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to   { opacity: 0; transform: scale(0.6) translateY(-6px); }
+}
+@keyframes dropdown-up-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to   { opacity: 0; transform: scale(0.6) translateY(6px); }
+}
+.animate-dropdown-down-out {
+  transform-origin: top center;
+  animation: dropdown-down-out 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-dropdown-up-out {
+  transform-origin: bottom center;
+  animation: dropdown-up-out 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* 选项错峰弹出：只写 from 帧，结束回落到元素自身样式，避免覆盖拖拽时的 opacity 类 */
+@keyframes dropdown-item-in {
+  from { opacity: 0; transform: translateY(-5px); }
+}
+.select-menu-item {
+  animation: dropdown-item-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--stagger-i, 0) * 30ms);
+}
+/* 无障碍联动：应用内「遵循系统减少动态效果」开关生效时下拉动画即时呈现 */
+html.reduce-motion .animate-dropdown-down,
+html.reduce-motion .animate-dropdown-up,
+html.reduce-motion .animate-dropdown-down-out,
+html.reduce-motion .animate-dropdown-up-out,
+html.reduce-motion .select-menu-item {
+  animation: none !important;
 }
 
 .safe-area-x {

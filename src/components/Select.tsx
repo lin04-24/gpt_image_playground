@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT } from '../lib/dropdown'
 import { ChevronDownIcon, EditIcon, PlusIcon, TrashIcon, DragHandleIcon } from './icons'
@@ -30,6 +30,10 @@ interface SelectProps {
 
 export default function Select({ value, onChange, onReorder, options, disabled, className, onOpenChange, showValueTooltips = false }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false)
+  // 关闭时菜单先播退出动画再卸载
+  const [isClosing, setIsClosing] = useState(false)
+  const wasOpenRef = useRef(false)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [menuMaxHeight, setMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
   const [placement, setPlacement] = useState<'bottom' | 'top'>('bottom')
   const [draggedValue, setDraggedValue] = useState<string | number | null>(null)
@@ -66,9 +70,23 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
   useEffect(() => {
     return () => {
       if (dragScrollIntervalRef.current) clearInterval(dragScrollIntervalRef.current)
+      clearTimeout(closeTimerRef.current)
       clearOptionTooltipTimer()
     }
   }, [])
+
+  useEffect(() => {
+    if (isOpen) {
+      wasOpenRef.current = true
+      clearTimeout(closeTimerRef.current)
+      setIsClosing(false)
+      return
+    }
+    if (!wasOpenRef.current) return
+    wasOpenRef.current = false
+    setIsClosing(true)
+    closeTimerRef.current = setTimeout(() => setIsClosing(false), 200)
+  }, [isOpen])
 
   useEffect(() => {
     onOpenChange?.(isOpen)
@@ -201,17 +219,20 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
         )}
       </div>
 
-      {isOpen && (
+      {(isOpen || isClosing) && (
         <div
           className={`absolute z-50 w-full overflow-hidden overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 custom-scrollbar ${
-            placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'
+            isOpen
+              ? placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up' : 'top-full mt-1.5 animate-dropdown-down'
+              : `pointer-events-none ${placement === 'top' ? 'bottom-full mb-1.5 animate-dropdown-up-out' : 'top-full mt-1.5 animate-dropdown-down-out'}`
           }`}
           style={{ maxHeight: menuMaxHeight }}
         >
-          {options.map((option) => (
+          {options.map((option, optionIdx) => (
             <div
               key={option.value}
               data-option-value={String(option.value)}
+              style={{ '--stagger-i': Math.min(optionIdx, 6) } as CSSProperties}
               draggable={option.draggable}
               onDragStart={(e) => {
                 if (!option.draggable) return
@@ -402,7 +423,7 @@ export default function Select({ value, onChange, onReorder, options, disabled, 
                 clearOptionTooltipTimer()
                 setHoveredOptionTooltip(null)
               }}
-              className={`relative flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${
+              className={`select-menu-item relative flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-xs transition-colors ${
                 draggedValue === option.value
                   ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]'
                   : option.variant === 'action'
