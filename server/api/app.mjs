@@ -6,7 +6,7 @@ import { redisKeys } from '../redis/keys.mjs'
 import { publishEvent } from '../events/publish.mjs'
 import { createImageStorage, isSafeImageId } from '../storage/imageFiles.mjs'
 import { decryptSecrets, encryptSecrets, publicProfile } from '../security/configCrypto.mjs'
-import { createTask, deleteTask, getTask, getTasksByIds, incomingTaskNewer, listTasks, newerTaskPredicate, normalizeTaskPageParams } from '../repositories/tasks.mjs'
+import { createTask, deleteTask, getTask, incomingTaskNewer, listTasks, newerTaskPredicate, normalizeTaskPageParams } from '../repositories/tasks.mjs'
 
 const SESSION_TTL = Number(process.env.SESSION_TTL_SECONDS || 2_592_000)
 const MAX_IMAGE_BYTES = 600 * 1024 * 1024
@@ -220,32 +220,25 @@ export async function buildApp({ database, redis, storage = createImageStorage()
     if (!await requireAuth(request, reply)) return
     const query = request.query || {}
     const filter = normalizeTaskPageParams(query)
-    const page = filter.page
     const hasFilter = Boolean(query.q || (query.status && query.status !== 'all') || query.favorite !== undefined || query.collectionId)
-    if (!hasFilter && page <= 2) {
+    // 无筛选前两页走短缓存；缓存键绑定 task_list_revision，任务任何变更都会换键，不会读到旧列表。
+    // 不再走 Redis 任务索引：索引与 revision 是多写者非事务状态，一旦错位会让"全部"列表永久为空
+    if (!hasFilter && filter.page <= 2) {
       const revisionRow = await database.query('SELECT task_list_revision FROM app_meta WHERE id = 1')
       const revision = Number(revisionRow.rows[0]?.task_list_revision || 0)
+      const cacheKey = redisKeys.taskPage(revision, filter.page)
       try {
-        const indexedRevision = Number(await redis.get(redisKeys.taskRevision) || 0)
-        const cacheKey = redisKeys.taskPage(revision, page)
-        if (indexedRevision === revision) {
-          const cached = await redis.get(cacheKey)
-          if (cached) return JSON.parse(cached)
-          const totalTasks = Number(await redis.zCard(redisKeys.taskCreated))
-          const ids = await redis.zRange(redisKeys.taskCreated, (page - 1) * filter.pageSize, page * filter.pageSize - 1, { REV: true })
-          const tasks = await getTasksByIds(database, ids)
-          if (tasks.length !== ids.length) {
-            const found = new Set(tasks.map((task) => task.id))
-            const missing = ids.filter((id) => !found.has(id))
-            if (missing.length) await redis.zRem(redisKeys.taskCreated, missing)
-            return listTasks(database, query)
+        const cached = await redis.get(cacheKey)
+        if (cached) {
+          const cachedResult = JSON.parse(cached)
+          // 空结果可能是在数据库迁移/启动窗口中写入的，不能阻塞之后出现的任务。
+          if (Array.isArray(cachedResult.tasks) && cachedResult.tasks.length) {
+            return cachedResult
           }
-          const result = { tasks, page, pageSize: filter.pageSize, totalTasks, totalPages: Math.ceil(totalTasks / filter.pageSize) }
-          await redis.set(cacheKey, JSON.stringify(result), { EX: 30 })
-          return result
         }
         const result = await listTasks(database, query)
-        await redis.set(cacheKey, JSON.stringify(result), { EX: 30 })
+        // 不缓存空页，避免迁移或服务启动期间的短暂空结果污染“全部”列表。
+        if (result.tasks.length) await redis.set(cacheKey, JSON.stringify(result), { EX: 30 })
         return result
       } catch {
         return listTasks(database, query)
@@ -575,6 +568,7 @@ export async function buildApp({ database, redis, storage = createImageStorage()
         await client.query(`INSERT INTO legacy_import_items (source_type, source_id, content_hash, result, payload) VALUES ('browser-task',$1,$2,'imported',$3::jsonb) ON CONFLICT (source_type, source_id) DO UPDATE SET content_hash=excluded.content_hash,result='imported',payload=excluded.payload,imported_at=now()`, [`${sourceId}:${item.id}`, hash, JSON.stringify({ updatedAt })])
         imported += 1
       }
+      if (imported > 0) await client.query('UPDATE app_meta SET task_list_revision = task_list_revision + 1, updated_at = now() WHERE id = 1')
     })
     return { sourceId, imported, existing, conflicts }
   })

@@ -7,7 +7,8 @@ export const redisKeys = {
   processing: (kind) => `${REDIS_PREFIX}queue:${kind}:processing`,
   taskCreated: `${REDIS_PREFIX}tasks:created`,
   taskRevision: `${REDIS_PREFIX}tasks:revision`,
-  taskPage: (revision, page) => `${REDIS_PREFIX}cache:tasks:${revision}:page:${page}`,
+  // v2 前缀隔离旧索引快速路径写入的缓存（其中可能缓存过空列表），避免升级后读到投毒数据
+  taskPage: (revision, page) => `${REDIS_PREFIX}cache:tasks:v2:${revision}:page:${page}`,
   taskDetail: (id, version) => `${REDIS_PREFIX}cache:task:${id}:${version}`,
   profilesPublic: `${REDIS_PREFIX}profiles:public`,
   favoriteCollection: (id) => `${REDIS_PREFIX}favorite:collection:${id}`,
