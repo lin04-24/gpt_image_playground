@@ -720,7 +720,10 @@ async function uploadMissingImages(remote: CloudSnapshot, session: number) {
     if (!image) continue
     const remoteImage = remoteImages.get(id)
     if (!remoteImage) {
-      const blob = await (await fetch(image.dataUrl)).blob()
+      const blob = image.blob instanceof Blob
+        ? image.blob
+        : (image.dataUrl ? await (await fetch(image.dataUrl)).blob() : undefined)
+      if (!blob) continue
       const response = await request(`/cloud-api/images/${encodeURIComponent(id)}`, {
         method: 'PUT',
         headers: {
@@ -737,8 +740,11 @@ async function uploadMissingImages(remote: CloudSnapshot, session: number) {
     }
     if (!remoteImage?.thumbnailMimeType) {
       const thumbnail = await getImageThumbnail(id)
-      if (thumbnail?.thumbnailDataUrl) {
-        const thumbnailBlob = await (await fetch(thumbnail.thumbnailDataUrl)).blob()
+      if (thumbnail) {
+        const thumbnailBlob = thumbnail.blob instanceof Blob
+          ? thumbnail.blob
+          : (thumbnail.thumbnailDataUrl ? await (await fetch(thumbnail.thumbnailDataUrl)).blob() : undefined)
+        if (!thumbnailBlob) continue
         const response = await request(`/cloud-api/images/${encodeURIComponent(id)}/thumbnail`, {
           method: 'PUT',
           headers: { 'Content-Type': thumbnailBlob.type || 'image/webp' },

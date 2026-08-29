@@ -1,6 +1,6 @@
 import type { AppSettings, InputDraft } from '../types'
 import { blobToDataUrl } from './dataUrl'
-import { CURRENT_THUMBNAIL_VERSION, getAllImageIds, getAllTasks, getImage, putTask } from './db'
+import { CURRENT_THUMBNAIL_VERSION, getAllImageIds, getAllTasks, getImage, getImageDataUrl, putTask } from './db'
 import { clearImageCaches, deleteImageCacheEntry, ensureImageCached, ensureImageThumbnailCached, setRemoteImageLoader, setRemoteImageThumbnailLoader } from './imageCache'
 import { isEmptyInputDraft, normalizeInputDraft, restoreGalleryInputDraftState } from './inputDraftState'
 import { BACKEND_PAGE_SIZE, backendImageUrl, finalizeBackendBrowserMigration, getBackendAppState, getBackendFavoriteCollections, getBackendMigrationStatus, getBackendProfiles, getBackendTasks, migrateBackendBrowserImage, migrateBackendBrowserManifest, migrateBackendBrowserTasks, putBackendAppState, subscribeBackendEvents, uploadBackendImage, upsertBackendProfile } from './backendApi'
@@ -147,7 +147,7 @@ export function setBackendPage(page: number) {
 async function backendGalleryDraftPayload(draft: InputDraft | null) {
   if (!draft) return null
   const inputImages = await Promise.all(draft.inputImages.map(async (img) => {
-    const dataUrl = img.dataUrl || (await getImage(img.id))?.dataUrl || ''
+    const dataUrl = img.dataUrl || (await getImageDataUrl(img.id)) || ''
     if (dataUrl) await uploadBackendImage(dataUrl, img.id)
     return { id: img.id, dataUrl: '' }
   }))
@@ -379,7 +379,8 @@ async function migrateBrowserData() {
   const images = (await Promise.all(imageIds.map(async (id) => {
     const image = await getImage(id)
     if (!image) return null
-    return { id, contentSha256: await digestDataUrl(image.dataUrl) }
+    const dataUrl = await getImageDataUrl(id)
+    return { id, contentSha256: dataUrl ? await digestDataUrl(dataUrl) : undefined }
   }))).filter((image): image is { id: string; contentSha256: string | undefined } => Boolean(image))
   const manifest = await migrateBackendBrowserManifest({ sourceId, tasks: tasks.map((task) => ({ id: task.id })), images })
   if (manifest.images.conflicts.length) throw new Error(`浏览器迁移发现 ${manifest.images.conflicts.length} 个图片摘要冲突`)
@@ -388,7 +389,8 @@ async function migrateBrowserData() {
     if (!missingImages.has(image.id)) continue
     const stored = await getImage(image.id)
     if (!stored) continue
-    await migrateBackendBrowserImage(sourceId, image.id, stored.dataUrl)
+    const dataUrl = await getImageDataUrl(image.id)
+    if (dataUrl) await migrateBackendBrowserImage(sourceId, image.id, dataUrl)
   }
   let imported = 0
   let existing = 0

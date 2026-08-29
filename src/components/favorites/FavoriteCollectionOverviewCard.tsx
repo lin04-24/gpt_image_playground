@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type SVGProps } from 'react'
 import type { TaskRecord, FavoriteCollection } from '../../types'
-import { ensureImageThumbnailCached, subscribeImageThumbnail } from '../../lib/imageCache'
+import { ensureImageThumbnailCached, ensureImageThumbnailObjectUrl, subscribeImageThumbnail } from '../../lib/imageCache'
 import { TooltipButton as FavoriteActionButton } from '../TooltipButton'
 import { EditIcon, FavoriteIcon, TrashIcon } from '../icons'
 import type { CollectionCard } from './favoriteUtils'
@@ -22,10 +22,16 @@ function CoverThumbnail({ task }: { task?: TaskRecord }) {
     if (!imageId) return
     let cancelled = false
     const unsubscribe = subscribeImageThumbnail(imageId, (thumbnail) => {
-      if (!cancelled) setSrc(thumbnail.dataUrl)
+      void ensureImageThumbnailObjectUrl(imageId).then((url) => {
+        if (!cancelled && url) setSrc(url)
+      })
     })
     ensureImageThumbnailCached(imageId).then((thumbnail) => {
-      if (!cancelled && thumbnail) setSrc(thumbnail.dataUrl)
+      if (!cancelled && thumbnail) {
+        void ensureImageThumbnailObjectUrl(imageId).then((url) => {
+          if (!cancelled && url) setSrc(url)
+        })
+      }
     }).catch(() => {})
     return () => {
       cancelled = true

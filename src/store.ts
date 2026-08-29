@@ -24,6 +24,7 @@ import {
   commitTaskDeletion,
   clearTasks as dbClearTasks,
   getImage,
+  getImageDataUrl,
   getStoredImageThumbnail,
   getStoredSmallImageThumbnail,
   getImageThumbnail,
@@ -1249,10 +1250,10 @@ export async function initStore(options: { deferImageCleanup?: boolean } = {}) {
       cacheImage(img.id, img.dataUrl)
       continue
     }
-    const storedImage = await getImage(img.id)
-    if (storedImage?.dataUrl) {
-      restoredInputImages.push({ ...img, dataUrl: storedImage.dataUrl })
-      cacheImage(img.id, storedImage.dataUrl)
+    const storedDataUrl = await getImageDataUrl(img.id)
+    if (storedDataUrl) {
+      restoredInputImages.push({ ...img, dataUrl: storedDataUrl })
+      cacheImage(img.id, storedDataUrl)
     }
   }
   if (restoredInputImages.length !== persistedInputImages.length || restoredInputImages.some((img, index) => img.dataUrl !== persistedInputImages[index]?.dataUrl)) {
@@ -1267,10 +1268,10 @@ export async function initStore(options: { deferImageCleanup?: boolean } = {}) {
         cacheImage(img.id, img.dataUrl)
         continue
       }
-      const storedImage = await getImage(img.id)
-      if (storedImage?.dataUrl) {
-        restoredGalleryImages.push({ ...img, dataUrl: storedImage.dataUrl })
-        cacheImage(img.id, storedImage.dataUrl)
+      const storedDataUrl = await getImageDataUrl(img.id)
+      if (storedDataUrl) {
+        restoredGalleryImages.push({ ...img, dataUrl: storedDataUrl })
+        cacheImage(img.id, storedDataUrl)
       }
     }
     const restoredGalleryDraft: InputDraft = {
@@ -2240,7 +2241,7 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
         if (!image) continue
         images.push(image)
         const thumbnail = await getImageThumbnail(id)
-        if (!thumbnail?.thumbnailDataUrl) continue
+        if (!thumbnail || (!thumbnail.thumbnailDataUrl && !(thumbnail.blob instanceof Blob))) continue
         thumbnailsByImageId.set(id, thumbnail)
       }
 

@@ -1,7 +1,7 @@
 import { memo, useEffect, useState, useRef, type ReactNode } from 'react'
 import type { TaskRecord } from '../types'
 import { useStore, retryTask } from '../store'
-import { ensureImageThumbnailCached, subscribeImageThumbnail } from '../lib/imageCache'
+import { ensureImageThumbnailCached, ensureImageThumbnailObjectUrl, subscribeImageThumbnail } from '../lib/imageCache'
 import { formatImageRatio } from '../lib/size'
 import { getParamDisplay, ActualValueBadge } from '../lib/paramDisplay'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_FAL_MODEL } from '../lib/apiProfiles'
@@ -255,7 +255,9 @@ function TaskCard({
 
     const applyThumbnail = (thumbnail: { dataUrl: string; width?: number; height?: number }) => {
       if (cancelled) return
-      setThumbSrc(thumbnail.dataUrl)
+      void ensureImageThumbnailObjectUrl(coverImageId).then((url) => {
+        if (!cancelled && url) setThumbSrc(url)
+      })
       if (thumbnail.width && thumbnail.height) {
         setCoverRatio(formatImageRatio(thumbnail.width, thumbnail.height))
         setCoverSize(`${thumbnail.width}×${thumbnail.height}`)

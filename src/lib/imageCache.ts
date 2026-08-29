@@ -3,6 +3,8 @@ import {
   CURRENT_SMALL_THUMBNAIL_VERSION,
   deriveSmallImageThumbnail,
   getImage,
+  getImageBlob,
+  getImageThumbnailBlob,
   getImageThumbnail,
   getStoredFreshImageThumbnail,
   getStoredFreshSmallImageThumbnail,
@@ -10,6 +12,7 @@ import {
   putImage,
   putImageThumbnail,
 } from './db'
+import { blobToDataUrl } from './dataUrl'
 
 type ImageThumbnail = {
   dataUrl: string
@@ -21,6 +24,11 @@ type ImageThumbnail = {
 const imageCache = new Map<string, string>()
 const imageLoadPromises = new Map<string, Promise<string | undefined>>()
 const thumbnailCache = new Map<string, ImageThumbnail>()
+// 展示层使用的 Object URL 与数据缓存分离，避免把 blob URL 泄漏到持久化 state。
+const imageObjectUrlCache = new Map<string, string>()
+const thumbnailObjectUrlCache = new Map<string, string>()
+const imageObjectUrlPromises = new Map<string, Promise<string | undefined>>()
+const thumbnailObjectUrlPromises = new Map<string, Promise<string | undefined>>()
 const thumbnailBackfillIds = new Map<string, 'visible' | 'background'>()
 const thumbnailBackfillRunningIds = new Set<string>()
 const thumbnailSubscribers = new Map<string, Set<(thumbnail: ImageThumbnail) => void>>()
@@ -54,6 +62,8 @@ export function getCachedImage(id: string): string | undefined {
 }
 
 export function cacheImage(id: string, dataUrl: string) {
+  const previous = imageCache.get(id)
+  if (previous && previous !== dataUrl) revokeObjectUrl(imageObjectUrlCache, id)
   imageCache.delete(id)
   imageCache.set(id, dataUrl)
   while (imageCache.size > MAX_IMAGE_CACHE_ENTRIES) {
@@ -63,8 +73,105 @@ export function cacheImage(id: string, dataUrl: string) {
   }
 }
 
+function revokeObjectUrl(cache: Map<string, string>, id: string) {
+  const url = cache.get(id)
+  if (url && url.startsWith('blob:') && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+  cache.delete(id)
+}
+
+function pruneObjectUrlCache(cache: Map<string, string>, maxEntries: number) {
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value
+    if (oldestKey == null) break
+    revokeObjectUrl(cache, oldestKey)
+  }
+}
+
+async function createDisplayObjectUrl(dataUrl: string) {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return dataUrl
+  try {
+    const blob = await (await fetch(dataUrl)).blob()
+    return URL.createObjectURL(blob)
+  } catch {
+    return dataUrl
+  }
+}
+
+function createBlobObjectUrl(blob: Blob) {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return undefined
+  return URL.createObjectURL(blob)
+}
+
+/** 获取原图展示 URL。返回值只用于 DOM，不应写入持久化 state。 */
+export async function ensureImageObjectUrl(id: string): Promise<string | undefined> {
+  const cached = imageObjectUrlCache.get(id)
+  if (cached) {
+    imageObjectUrlCache.delete(id)
+    imageObjectUrlCache.set(id, cached)
+    return cached
+  }
+  const pending = imageObjectUrlPromises.get(id)
+  if (pending) return pending
+  const load = (async () => {
+    const blob = typeof getImageBlob === 'function' ? await getImageBlob(id) : undefined
+    const directUrl = blob ? createBlobObjectUrl(blob) : undefined
+    if (directUrl) {
+      imageObjectUrlCache.set(id, directUrl)
+      pruneObjectUrlCache(imageObjectUrlCache, MAX_IMAGE_CACHE_ENTRIES)
+      return directUrl
+    }
+    const dataUrl = await ensureImageCached(id)
+    if (!dataUrl) return undefined
+    const displayUrl = await createDisplayObjectUrl(dataUrl)
+    imageObjectUrlCache.set(id, displayUrl)
+    pruneObjectUrlCache(imageObjectUrlCache, MAX_IMAGE_CACHE_ENTRIES)
+    return displayUrl
+  })()
+  imageObjectUrlPromises.set(id, load)
+  try {
+    return await load
+  } finally {
+    if (imageObjectUrlPromises.get(id) === load) imageObjectUrlPromises.delete(id)
+  }
+}
+
+/** 获取缩略图展示 URL。返回值只用于 DOM，不应写入持久化 state。 */
+export async function ensureImageThumbnailObjectUrl(id: string): Promise<string | undefined> {
+  const cached = thumbnailObjectUrlCache.get(id)
+  if (cached) {
+    thumbnailObjectUrlCache.delete(id)
+    thumbnailObjectUrlCache.set(id, cached)
+    return cached
+  }
+  const pending = thumbnailObjectUrlPromises.get(id)
+  if (pending) return pending
+  const load = (async () => {
+    const blob = typeof getImageThumbnailBlob === 'function' ? await getImageThumbnailBlob(id, true) : undefined
+    const directUrl = blob ? createBlobObjectUrl(blob) : undefined
+    if (directUrl) {
+      thumbnailObjectUrlCache.set(id, directUrl)
+      pruneObjectUrlCache(thumbnailObjectUrlCache, MAX_THUMBNAIL_CACHE_ENTRIES)
+      return directUrl
+    }
+    const thumbnail = await ensureImageThumbnailCached(id)
+    if (!thumbnail?.dataUrl) return undefined
+    const displayUrl = await createDisplayObjectUrl(thumbnail.dataUrl)
+    thumbnailObjectUrlCache.set(id, displayUrl)
+    pruneObjectUrlCache(thumbnailObjectUrlCache, MAX_THUMBNAIL_CACHE_ENTRIES)
+    return displayUrl
+  })()
+  thumbnailObjectUrlPromises.set(id, load)
+  try {
+    return await load
+  } finally {
+    if (thumbnailObjectUrlPromises.get(id) === load) thumbnailObjectUrlPromises.delete(id)
+  }
+}
+
 export function deleteCachedImage(id: string) {
   imageCache.delete(id)
+  revokeObjectUrl(imageObjectUrlCache, id)
 }
 
 function getCachedThumbnail(id: string) {
@@ -80,12 +187,15 @@ function getCachedThumbnail(id: string) {
 
 export function cacheThumbnail(id: string, thumbnail: ImageThumbnail) {
   if (thumbnail.thumbnailVersion !== CURRENT_SMALL_THUMBNAIL_VERSION) return
+  const previous = thumbnailCache.get(id)
+  if (previous && previous.dataUrl !== thumbnail.dataUrl) revokeObjectUrl(thumbnailObjectUrlCache, id)
   thumbnailCache.delete(id)
   thumbnailCache.set(id, thumbnail)
   while (thumbnailCache.size > MAX_THUMBNAIL_CACHE_ENTRIES) {
     const oldestKey = thumbnailCache.keys().next().value
     if (oldestKey == null) break
     thumbnailCache.delete(oldestKey)
+    revokeObjectUrl(thumbnailObjectUrlCache, oldestKey)
   }
 }
 
@@ -117,6 +227,8 @@ export async function storeAndPublishImageThumbnail(large: StoredImageThumbnail)
 export function deleteImageCacheEntry(id: string) {
   imageCache.delete(id)
   thumbnailCache.delete(id)
+  revokeObjectUrl(imageObjectUrlCache, id)
+  revokeObjectUrl(thumbnailObjectUrlCache, id)
   thumbnailBackfillIds.delete(id)
   thumbnailBackfillRunningIds.delete(id)
   thumbnailSubscribers.delete(id)
@@ -125,6 +237,8 @@ export function deleteImageCacheEntry(id: string) {
 export function clearImageCaches() {
   imageCache.clear()
   thumbnailCache.clear()
+  for (const id of imageObjectUrlCache.keys()) revokeObjectUrl(imageObjectUrlCache, id)
+  for (const id of thumbnailObjectUrlCache.keys()) revokeObjectUrl(thumbnailObjectUrlCache, id)
   thumbnailBackfillIds.clear()
 }
 
@@ -138,8 +252,22 @@ export async function ensureImageCached(id: string): Promise<string | undefined>
   const load = (async () => {
     const rec = await getImage(id)
     if (rec) {
-      cacheImage(id, rec.dataUrl)
-      return rec.dataUrl
+      if (rec.dataUrl) {
+        cacheImage(id, rec.dataUrl)
+        return rec.dataUrl
+      }
+      if (rec.blob instanceof Blob) {
+        const dataUrl = await blobToDataUrl(rec.blob, rec.blob.type || 'image/png')
+        cacheImage(id, dataUrl)
+        return dataUrl
+      }
+      const migratedBlob = await getImageBlob(id)
+      if (migratedBlob) {
+        const dataUrl = await blobToDataUrl(migratedBlob, migratedBlob.type || 'image/png')
+        cacheImage(id, dataUrl)
+        return dataUrl
+      }
+      return undefined
     }
 
     if (!remoteImageLoader) return undefined
@@ -154,8 +282,10 @@ export async function ensureImageCached(id: string): Promise<string | undefined>
 
     const image = typeof remote === 'string' ? { id, dataUrl: remote } : remote
     await putImage(image)
-    cacheImage(id, image.dataUrl)
-    return image.dataUrl
+    const dataUrl = image.dataUrl || (image.blob instanceof Blob ? await blobToDataUrl(image.blob, image.blob.type || 'image/png') : '')
+    if (!dataUrl) return undefined
+    cacheImage(id, dataUrl)
+    return dataUrl
   })()
 
   imageLoadPromises.set(id, load)
@@ -171,15 +301,17 @@ export async function ensureImageThumbnailCached(id: string): Promise<ImageThumb
   if (cached) return cached
 
   const storedSmall = await getStoredFreshSmallImageThumbnail(id)
-  if (storedSmall?.thumbnailDataUrl) {
-    const thumbnail = toImageThumbnail(storedSmall)
+  if (storedSmall && (storedSmall.thumbnailDataUrl || storedSmall.blob instanceof Blob)) {
+    const thumbnail = storedSmall.thumbnailDataUrl
+      ? toImageThumbnail(storedSmall)
+      : { ...toImageThumbnail(storedSmall), dataUrl: await blobToDataUrl(storedSmall.blob!, storedSmall.blob!.type || 'image/webp') }
     cacheThumbnail(id, thumbnail)
     return thumbnail
   }
 
   // 存量数据只有 720 大档：现场派生 320 小档完成回填，避免为此重新解码原图
   const storedLarge = await getStoredFreshImageThumbnail(id)
-  if (storedLarge?.thumbnailDataUrl) {
+  if (storedLarge && (storedLarge.thumbnailDataUrl || storedLarge.blob instanceof Blob)) {
     const derived = await deriveSmallImageThumbnail(storedLarge)
     if (derived?.thumbnailDataUrl) {
       const thumbnail = toImageThumbnail(derived)
@@ -210,7 +342,10 @@ export async function ensureImageThumbnailCached(id: string): Promise<ImageThumb
 /** 详情弹窗占位图：优先 720 大档，缺失时退回网格小档 */
 export async function ensureLargeImageThumbnailCached(id: string): Promise<ImageThumbnail | undefined> {
   const large = await getStoredFreshImageThumbnail(id)
-  if (large?.thumbnailDataUrl) return toImageThumbnail(large)
+  if (large && (large.thumbnailDataUrl || large.blob instanceof Blob)) {
+    if (large.thumbnailDataUrl) return toImageThumbnail(large)
+    return { ...toImageThumbnail(large), dataUrl: await blobToDataUrl(large.blob!, large.blob!.type || 'image/webp') }
+  }
   return ensureImageThumbnailCached(id)
 }
 
