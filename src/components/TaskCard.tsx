@@ -77,7 +77,7 @@ function TaskCard({
   const [swipeDirection, setSwipeDirection] = useState<-1 | 0 | 1>(0)
   const [streamPreviewLoaded, setStreamPreviewLoaded] = useState(false)
   const toggleTaskSelection = useStore((s) => s.toggleTaskSelection)
-  const settings = useStore((s) => s.settings)
+  const alwaysShowRetryButton = useStore((s) => s.settings.alwaysShowRetryButton)
   const openFavoritePicker = useStore((s) => s.openFavoritePicker)
   const streamPreviewSrc = useStore((s) => s.streamPreviews[task.id] || '')
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
@@ -632,7 +632,7 @@ function TaskCard({
               onTouchEnd={(e) => e.stopPropagation()}
               onTouchCancel={(e) => e.stopPropagation()}
             >
-              {((task.status === 'error' && !isFalReconnecting) || settings.alwaysShowRetryButton) && (
+              {((task.status === 'error' && !isFalReconnecting) || alwaysShowRetryButton) && (
                 <TaskActionButton
                   tooltip="重试任务"
                   onClick={() => retryTask(task)}
