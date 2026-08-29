@@ -1,3 +1,18 @@
+# V3.2.3（2026-08-29）
+
+### 功能
+- 首页顶部标题 "GPT Image Playground" 新增金属光泽扫光文字动效（Metallic Shimmer Text）：`background-clip: text` 裁剪 135° 多段高对比 Silver/Gold 金属渐变（深板岩银 → 银灰 → 金色微光 → 纯白高光），keyframes 沿 45° 对角线等比平移 `background-position`，营造金属光影流淌效果。
+- 渐变两端同色、行程严格限制在单个渐变图范围内并配合 `no-repeat`，单周期 3.6s，循环无缝且任意时刻文字都不会露出透明底。
+- 暗色模式下通过 `prefers-color-scheme` 提亮渐变基色，避免亮带间隙期标题隐没在深色背景里。
+- 仅首页顶部标题链接应用此动效，收藏集标题与登录页副标题保持纯色不受影响。
+
+### 实现说明
+- 动效样式集中在 `src/index.css`，仅在 `Header.tsx` 标题链接上挂 `metallic-shimmer-text` 类。
+- 与设置中"遵循系统减少动态效果"联动：`html.reduce-motion` 生效时停用动画并恢复 `currentColor` 纯色文字，链接上保留的主题颜色类作为恢复源。
+
+### 升级说明
+- 未修改 README、数据库结构、持久化字段或公开 API，升级无需迁移操作。
+
 # V3.2.1（2026-08-29）
 
 ### 修复
