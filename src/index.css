@@ -75,6 +75,32 @@ body.drag-selecting * {
   contain-intrinsic-size: auto 10.25rem;
 }
 
+/* 网格重排动画：新增/筛选后出现的卡片淡入放大入场，配合 FLIP 位移过渡 */
+@keyframes task-card-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.task-card-enter {
+  animation: task-card-enter 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 无障碍降级：设置开启"遵循系统减少动态效果"且系统启用该模式时，压缩全局装饰性动画 */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: 240 10% 4%;
