@@ -1,3 +1,22 @@
+# V3.2.4（2026-08-29）
+
+### 功能
+- 固定 Header 新增头部阴影渐变动效（Scroll Shadow）：页面贴顶时 Header 无影融入内容，滚动偏离顶部（超过 10px）后渐显底部柔和投影示意悬浮层级，回到顶部时阴影平滑褪去。
+- 阈值与参考实现一致取 `window.scrollY > 10`，滚动监听为 passive 且挂载时先执行一次，刷新后落在页面中部也能正确显示阴影。
+
+### 实现说明
+- 监听逻辑在 `src/components/Header.tsx`，滚动状态切换 `is-scrolled` 类；样式在 `src/index.css` 中仅对 `box-shadow` 做 250ms `cubic-bezier(0.16, 1, 0.3, 1)` 过渡（无背景/边框过渡，因 Header 贴顶与滚动时二者恒定）。
+- 投影为 `0 8px 24px -12px` 下沉式柔影，暗色模式通过 `prefers-color-scheme`（项目 Tailwind `darkMode: 'media'`）加深不透明度。
+- Header 原有的常驻底边框保留，仅以阴影表达悬浮层级，与参考素材行为一致。
+- 与设置中"遵循系统减少动态效果"联动：`html.reduce-motion` 全局降级规则将过渡压缩为即时呈现，开启后阴影为瞬时切换而非动画渐变。
+
+### 升级说明
+- 未修改 README、数据库结构、持久化字段或公开 API，升级无需迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（34 个测试文件，256 项测试）。
+
 # V3.2.3（2026-08-29）
 
 ### 功能
