@@ -169,7 +169,8 @@ export async function buildApp({ database, redis, storage = createImageStorage()
   fastify.get('/api/auth/session', async (request, reply) => {
     const current = await session(request)
     if (current?.unavailable) return reply.code(503).send(errorPayload('SESSION_UNAVAILABLE', '会话服务暂时不可用'))
-    return { authenticated: Boolean(current) }
+    // 返回 csrfToken 供前端恢复：cookie 是持久 cookie，但前端 sessionStorage 关浏览器即清空
+    return current ? { authenticated: true, csrfToken: current.csrf } : { authenticated: false }
   })
   fastify.post('/api/auth/login', async (request, reply) => {
     const ip = String(request.ip || 'unknown')
@@ -200,7 +201,8 @@ export async function buildApp({ database, redis, storage = createImageStorage()
   fastify.get('/cloud-api/session', async (request, reply) => {
     const current = await session(request)
     if (current?.unavailable) return reply.code(503).send(errorPayload('SESSION_UNAVAILABLE', '会话服务暂时不可用'))
-    return { authenticated: Boolean(current) }
+    // 与 /api/auth/session 一致，返回 csrfToken 供旧路径前端恢复
+    return current ? { authenticated: true, csrfToken: current.csrf } : { authenticated: false }
   })
   fastify.post('/cloud-api/login', async (request, reply) => fastify.inject({ method: 'POST', url: '/api/auth/login', payload: request.body }).then((response) => {
     reply.code(response.statusCode)

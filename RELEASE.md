@@ -1,3 +1,12 @@
+# V2.1.3（2026-08-29）
+
+### 修复
+- 修复重开浏览器后所有修改操作提示「CSRF Token 无效」的问题（新开标签页同样受影响）。原因：会话 cookie 为持久 cookie（30 天有效），关闭浏览器不失效，但 CSRF Token 存储在前端 sessionStorage 中，关闭浏览器即被清空；重开浏览器后会话检查仅返回「已登录」，前端取不回 Token，所有写请求因缺少 `X-CSRF-Token` 头被服务端拒绝，只能重新登录恢复。现在 `/api/auth/session` 与 `/cloud-api/session` 在已登录时返回 csrfToken，前端会话检查时自动写回 sessionStorage，重开浏览器、新开标签页或清除站点存储后均无需重新登录。
+
+### 验证
+- `npm run build` 通过。
+- `npm test -- --run` 通过（31 个测试文件，240 项测试）。
+
 # V2.1.2（2026-08-29）
 
 ### 修复
