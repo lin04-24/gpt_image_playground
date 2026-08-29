@@ -5,6 +5,7 @@ import { ensureImageThumbnailCached, ensureImageThumbnailObjectUrl, subscribeIma
 import { formatImageRatio } from '../lib/size'
 import { getParamDisplay, ActualValueBadge } from '../lib/paramDisplay'
 import { DEFAULT_IMAGES_MODEL, DEFAULT_FAL_MODEL } from '../lib/apiProfiles'
+import { getBeamAnimationDelay, getBeamPhaseSeed } from '../lib/beamAnimation'
 import { CodeIcon, TransparentBgIcon } from './icons'
 import LottieLoading from './LottieLoading'
 import ViewportTooltip from './ViewportTooltip'
@@ -18,12 +19,6 @@ interface Props {
   onClick: (task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => void
   isSelected?: boolean
   disableSwipe?: boolean
-}
-
-function getBeamAnimationDelay(taskId: string) {
-  let phase = 0
-  for (const char of taskId) phase = (phase * 31 + char.charCodeAt(0)) % 3000
-  return `${-phase}ms`
 }
 
 function TaskActionButton({
@@ -99,8 +94,12 @@ function TaskCard({
   const swipeFrameRef = useRef<number | null>(null)
   const spotlightPointRef = useRef<{ x: number; y: number } | null>(null)
   const spotlightFrameRef = useRef<number | null>(null)
-  // 用任务 ID 派生固定相位，避免负延迟把不同任务重新拉回同一全局时钟
-  const beamAnimationDelayRef = useRef(getBeamAnimationDelay(task.id))
+  // 种子决定每个任务的独立走向，挂载时再叠加当前时间以接续动画进度
+  const beamPhaseSeed = typeof task.beamPhase === 'number' && Number.isFinite(task.beamPhase)
+    ? task.beamPhase
+    : getBeamPhaseSeed(task.id)
+  const beamPhaseRef = useRef(beamPhaseSeed)
+  const beamAnimationDelayRef = useRef(getBeamAnimationDelay(beamPhaseRef.current))
 
   const updateSwipeDirection = (nextDirection: -1 | 0 | 1) => {
     if (swipeDirectionRef.current === nextDirection) return

@@ -233,6 +233,8 @@ export interface TaskRecord {
   finishedAt: number | null
   /** 总耗时毫秒 */
   elapsed: number | null
+  /** 仅前端使用：占位任务替换为服务端任务时保持流光环相位独立且连续 */
+  beamPhase?: number
   /** 是否收藏 */
   isFavorite?: boolean
   /** 所属收藏夹 ID 列表 */
