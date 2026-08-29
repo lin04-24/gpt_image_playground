@@ -1,3 +1,21 @@
+# V2.2.2（2026-08-29）
+
+### 性能
+- 编辑请求输入图/遮罩 Blob 只转换一次：images 模式并发 n 路与自定义服务商 multipart 模板此前会在每一路独立执行 canvas 解码+重编码，同一张 4K 输入图被重复转换 n 次，浪费且阻塞主线程。现在在 `callOpenAICompatibleImageApi` 入口统一预转换一次，通过 `inputImageBlobs`/`maskBlob` 传入并发各路复用（Blob 跨 FormData 复用是安全的）；responses 模式与自定义服务商 JSON 提交不涉及 Blob 转换，不做无谓预转换。
+- 输出图并行落库：`storeTaskOutputImages` 由逐张串行改为 `Promise.all` 并行，整串 base64 的 SHA-256 哈希、缩略图生成与 IndexedDB 写入互相重叠，n 张 4K 输出图的任务完成耗时从串行累加降为最慢单张耗时；任一张失败仍统一清理已写入的图片并整体报错，错误语义与清理行为保持不变。
+- 缩略图异步编码：`createImageThumbnail` 的 `canvas.toDataURL('image/webp')` 换成异步 `canvas.toBlob` 再转 data URL，浏览器可将编码移出主线程，减少大图缩略图生成对主线程的阻塞；缩略图尺寸、质量与版本号均未变化。
+- 透明背景后处理移出关键路径：透明背景任务不再等待逐张 CPU 泛洪填充 + 全尺寸 PNG 重编码，先以原图作为输出立即标记任务完成，浏览器空闲时（requestIdleCallback，最长 2 秒兜底）再逐张透明化并替换输出；替换前校验任务该位置的输出未被变更，任务被删除或结果已替换时丢弃处理结果，不产生孤儿图片。处理失败仍以原图展示，`transparentOriginalImages` 对应位置按原语义标记为失败。
+
+### 功能情况
+- 编辑请求的请求体结构、并发上限（6）、429/408/5xx 自动重试、failedRequests 上报、流式部分图回调的 requestIndex 语义均保持不变；每路请求仍独立构建 FormData 与超时控制。
+- 透明背景任务完成瞬间会先短暂显示原图，空闲处理完成后数秒内自动替换为透明版本；若图内无键色背景（透明化后字节级相同），会一直显示原图，与旧版按内容去重时的表现一致。
+- 未修改数据库结构、公开 API 返回格式或 README，升级不需要额外迁移操作。
+
+### 验证
+- 新增 `src/lib/openaiCompatibleImageApi.test.ts` 4 项测试：images 并发编辑 n=3 时输入图 Blob 只转换 1 次；带遮罩时第一张转 PNG、其余转原始 Blob、遮罩各自只转换 1 次；自定义服务商 multipart 编辑只转换 1 次；自定义服务商 JSON 提交不做预转换。
+- `npm run build` 通过。
+- `npm test` 通过（32 个测试文件，248 项测试）。
+
 # V2.2.1（2026-08-29）
 
 ### 功能
