@@ -308,6 +308,24 @@ export function deleteImage(id: string): Promise<undefined> {
   )
 }
 
+/** 批量删除图片及对应缩略图，单事务避免逐条 await 的开销 */
+export function deleteImages(ids: string[]): Promise<undefined> {
+  return openDB().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction([STORE_IMAGES, STORE_THUMBNAILS, STORE_SMALL_THUMBNAILS], 'readwrite')
+        for (const id of ids) {
+          tx.objectStore(STORE_IMAGES).delete(id)
+          tx.objectStore(STORE_THUMBNAILS).delete(id)
+          tx.objectStore(STORE_SMALL_THUMBNAILS).delete(id)
+        }
+        tx.oncomplete = () => resolve(undefined)
+        tx.onerror = () => reject(tx.error)
+        tx.onabort = () => reject(tx.error)
+      }),
+  )
+}
+
 export function clearImages(): Promise<undefined> {
   return openDB().then(
     (db) =>

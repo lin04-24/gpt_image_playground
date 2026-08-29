@@ -33,6 +33,7 @@ import {
   putImageThumbnail,
   putSmallImageThumbnail,
   deleteImage,
+  deleteImages,
   clearImages,
   storeImage,
   storeImageWithSize,
@@ -1215,16 +1216,18 @@ export async function cleanupUnreferencedImages(tasks?: TaskRecord[], isCurrent 
 
   // 只枚举 key 清理孤立图片，避免启动时把所有 4K 原图读进内存。
   const imageIds = await getAllImageIds()
+  const orphanImageIds: string[] = []
   const backfillImageIds: string[] = []
   for (const id of imageIds) {
     if (!isCurrent()) return
     if (referencedIds.has(id)) {
       if (thumbnailIds.has(id)) backfillImageIds.push(id)
     } else {
-      await deleteImage(id)
+      orphanImageIds.push(id)
     }
   }
   if (!isCurrent()) return
+  if (orphanImageIds.length) await deleteImages(orphanImageIds)
   scheduleThumbnailBackfill(backfillImageIds)
 }
 
@@ -1267,39 +1270,39 @@ export async function initStore(options: { deferImageCleanup?: boolean } = {}) {
   const state = useStore.getState()
   const persistedInputImages = state.inputImages
   const galleryInputDraft = state.galleryInputDraft
-  if (!options.deferImageCleanup) await cleanupUnreferencedImages(tasks)
 
-  const restoredInputImages: InputImage[] = []
-  for (const img of persistedInputImages) {
-    if (img.dataUrl) {
-      restoredInputImages.push(img)
-      cacheImage(img.id, img.dataUrl)
-      continue
-    }
-    const storedDataUrl = await getImageDataUrl(img.id)
-    if (storedDataUrl) {
-      restoredInputImages.push({ ...img, dataUrl: storedDataUrl })
-      cacheImage(img.id, storedDataUrl)
-    }
-  }
-  if (restoredInputImages.length !== persistedInputImages.length || restoredInputImages.some((img, index) => img.dataUrl !== persistedInputImages[index]?.dataUrl)) {
-    useStore.getState().setInputImages(restoredInputImages)
-  }
-
-  if (galleryInputDraft) {
-    const restoredGalleryImages: InputImage[] = []
-    for (const img of galleryInputDraft.inputImages) {
+  // 清理、输入图恢复、图库草稿恢复互不依赖，并行执行以缩短启动链路
+  const cleanupPromise = options.deferImageCleanup ? null : cleanupUnreferencedImages(tasks)
+  const restoreInputImagesPromise = (async () => {
+    const restored = await Promise.all(persistedInputImages.map(async (img) => {
       if (img.dataUrl) {
-        restoredGalleryImages.push(img)
         cacheImage(img.id, img.dataUrl)
-        continue
+        return img
       }
       const storedDataUrl = await getImageDataUrl(img.id)
-      if (storedDataUrl) {
-        restoredGalleryImages.push({ ...img, dataUrl: storedDataUrl })
-        cacheImage(img.id, storedDataUrl)
-      }
+      if (!storedDataUrl) return undefined
+      cacheImage(img.id, storedDataUrl)
+      return { ...img, dataUrl: storedDataUrl }
+    }))
+    const restoredInputImages = restored.filter((img) => img !== undefined)
+    if (restoredInputImages.length !== persistedInputImages.length || restoredInputImages.some((img, index) => img.dataUrl !== persistedInputImages[index]?.dataUrl)) {
+      useStore.getState().setInputImages(restoredInputImages)
     }
+  })()
+
+  const restoreGalleryDraftPromise = (async () => {
+    if (!galleryInputDraft) return
+    const restored = await Promise.all(galleryInputDraft.inputImages.map(async (img) => {
+      if (img.dataUrl) {
+        cacheImage(img.id, img.dataUrl)
+        return img
+      }
+      const storedDataUrl = await getImageDataUrl(img.id)
+      if (!storedDataUrl) return undefined
+      cacheImage(img.id, storedDataUrl)
+      return { ...img, dataUrl: storedDataUrl }
+    }))
+    const restoredGalleryImages = restored.filter((img) => img !== undefined)
     const restoredGalleryDraft: InputDraft = {
       ...galleryInputDraft,
       ...updateInputDraftImages(galleryInputDraft, restoredGalleryImages),
@@ -1334,7 +1337,9 @@ export async function initStore(options: { deferImageCleanup?: boolean } = {}) {
         })
       }
     }
-  }
+  })()
+
+  await Promise.all([cleanupPromise, restoreInputImagesPromise, restoreGalleryDraftPromise])
 }
 
 async function submitTaskViaBackend(options: {
