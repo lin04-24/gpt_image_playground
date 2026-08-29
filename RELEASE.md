@@ -1,3 +1,17 @@
+# V2.3.1（2026-08-29）
+
+### 修复
+- 后端模式 `thumbnail.ready` SSE 事件不再清空全部图片缓存：此前服务端任一缩略图就绪都会调用 `clearImageCaches()`，把原图 LRU（8 条）与缩略图 LRU（80 条）整体清空，所有可见卡片被迫重新回源、详情大图也要重新拉取。现在从事件 payload 解析 `imageId`，只调用 `deleteImageCacheEntry(id)` 失效对应图片，并立即重新拉取该图缩略图——成功后经 `storeAndPublishImageThumbnail` 派生 320 小档并通知订阅方，对应卡片自动更新，其余卡片完全不受影响。
+- 事件解析失败或缺少 `imageId` 时保留原有全量清空行为作为兜底（SSE payload 属外部输入），正确性不回退。
+
+### 功能情况
+- 仅影响后端模式的事件处理路径；纯浏览器模式与云端直连模式不消费 `thumbnail.ready` 事件，行为不变。
+- 未修改数据库结构（DB_VERSION 仍为 5）、公开 API 返回格式或 README，升级无需任何迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（32 个测试文件，248 项测试）。
+
 # V2.3.0（2026-08-29）
 
 ### 性能
