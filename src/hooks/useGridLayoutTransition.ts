@@ -64,7 +64,7 @@ export function useGridLayoutTransition(containerRef: RefObject<HTMLElement | nu
       nextPositions.set(id, { left, top })
       const prev = prevPositions.get(id)
       if (!prev) {
-        if (!firstMount) enterers.push(el)
+        if (!firstMount && el.dataset.taskGenerating !== 'true') enterers.push(el)
         return
       }
       const dx = prev.left - left

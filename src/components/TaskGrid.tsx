@@ -356,7 +356,12 @@ export default function TaskGrid() {
     >
       <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pb-10">
         {filteredTasks.map((task) => (
-          <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
+          <div
+            key={task.id}
+            className="task-card-wrapper"
+            data-task-id={task.id}
+            data-task-generating={task.status === 'queued' || task.status === 'running' ? 'true' : undefined}
+          >
             <TaskCard
               task={task}
               onClick={handleCardClick}

@@ -355,7 +355,7 @@ function TaskCard({
   return (
     <div className="relative rounded-xl">
       {/* 生成中：流光环形边框光柱 */}
-      {task.status === 'running' && <div className="border-beam-overlay" aria-hidden="true" />}
+      {(task.status === 'running' || isQueued) && <div className="border-beam-overlay" aria-hidden="true" />}
       {/* 侧滑底图 */}
       <div
         className={`absolute inset-0 rounded-xl flex items-center transition-opacity duration-200 pointer-events-none ${
@@ -380,7 +380,7 @@ function TaskCard({
         } ${
           !isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'
         } ${
-          task.status === 'running'
+          task.status === 'running' || isQueued
             ? 'border-blue-400 generating'
             : isSelected
             ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50'
