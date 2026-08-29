@@ -1413,7 +1413,11 @@ async function submitTaskViaBackend(options: {
       transparentPrompt: options.transparentPrompt,
     })
     await putTask(task)
-    useStore.getState().setTasks([task, ...useStore.getState().tasks.filter((item) => item.id !== task.id && item.id !== placeholderId)].slice(0, BACKEND_PAGE_SIZE))
+    const currentTasks = useStore.getState().tasks
+    const placeholderIndex = currentTasks.findIndex((item) => item.id === placeholderId)
+    const nextTasks = currentTasks.filter((item) => item.id !== task.id && item.id !== placeholderId)
+    nextTasks.splice(placeholderIndex < 0 ? 0 : Math.min(placeholderIndex, nextTasks.length), 0, task)
+    useStore.getState().setTasks(nextTasks.slice(0, BACKEND_PAGE_SIZE))
     useStore.getState().showToast('任务已提交', 'success')
   } catch (error) {
     // 提交失败时移除占位卡片，错误交由调用方提示
