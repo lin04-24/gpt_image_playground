@@ -789,7 +789,9 @@ export async function getCloudSessionStatus(): Promise<CloudSessionStatus> {
     const response = await request('/cloud-api/session')
     if (!responseIsJson(response)) return 'disabled'
     if (!response.ok) return 'unavailable'
-    const data = await response.json() as { authenticated?: boolean }
+    const data = await response.json() as { authenticated?: boolean; csrfToken?: string }
+    // 重开浏览器后 sessionStorage 已清空但会话 cookie 仍有效，用服务端返回的 token 恢复
+    if (data.csrfToken) window.sessionStorage.setItem('gpt-image-playground.backend-csrf', data.csrfToken)
     return data.authenticated ? 'authenticated' : 'login-required'
   } catch {
     return 'unavailable'
