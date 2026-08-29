@@ -211,9 +211,6 @@ export default function GeneralSettingsTab({
             <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.respectReducedMotion ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
           </button>
         </div>
-        <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-          开启后，系统启用"减少动态效果"（无障碍）模式时，网格重排、卡片入场、生成中任务的流光环形边框等动画会优雅降级为直接呈现；关闭后始终播放动画。
-        </div>
       </div>
     </div>
   )
