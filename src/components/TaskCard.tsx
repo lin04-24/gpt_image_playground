@@ -19,6 +19,12 @@ interface Props {
   disableSwipe?: boolean
 }
 
+function getBeamAnimationDelay(taskId: string) {
+  let phase = 0
+  for (const char of taskId) phase = (phase * 31 + char.charCodeAt(0)) % 3000
+  return `${-phase}ms`
+}
+
 function TaskActionButton({
   tooltip,
   className,
@@ -92,8 +98,8 @@ function TaskCard({
   const swipeFrameRef = useRef<number | null>(null)
   const spotlightPointRef = useRef<{ x: number; y: number } | null>(null)
   const spotlightFrameRef = useRef<number | null>(null)
-  // 使用任务创建时间固定动画相位，避免不同任务共享当前页面时钟
-  const beamAnimationDelayRef = useRef(`${-(task.createdAt % 3000)}ms`)
+  // 用任务 ID 派生固定相位，避免负延迟把不同任务重新拉回同一全局时钟
+  const beamAnimationDelayRef = useRef(getBeamAnimationDelay(task.id))
 
   const updateSwipeDirection = (nextDirection: -1 | 0 | 1) => {
     if (swipeDirectionRef.current === nextDirection) return
