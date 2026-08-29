@@ -31,12 +31,18 @@ const imageObjectUrlPromises = new Map<string, Promise<string | undefined>>()
 const thumbnailObjectUrlPromises = new Map<string, Promise<string | undefined>>()
 const thumbnailBackfillIds = new Map<string, 'visible' | 'background'>()
 const thumbnailBackfillRunningIds = new Set<string>()
+const thumbnailBackfillFailureCounts = new Map<string, number>()
 const thumbnailSubscribers = new Map<string, Set<(thumbnail: ImageThumbnail) => void>>()
 let thumbnailBackfillScheduled = false
 
 const MAX_IMAGE_CACHE_ENTRIES = 8
 const MAX_THUMBNAIL_CACHE_ENTRIES = 80
 const MAX_THUMBNAIL_BACKFILL_CONCURRENT = 4
+const THUMBNAIL_REMOTE_RETRY_LIMIT = 3
+const THUMBNAIL_REMOTE_RETRY_BACKOFF_MS = [500, 1_000, 2_000]
+const THUMBNAIL_BACKFILL_RETRY_LIMIT = 3
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 export type RemoteImageLoader = (id: string) => Promise<StoredImage | string | undefined>
 export type RemoteImageThumbnailLoader = (id: string) => Promise<StoredImageThumbnail | undefined>
@@ -231,6 +237,7 @@ export function deleteImageCacheEntry(id: string) {
   revokeObjectUrl(thumbnailObjectUrlCache, id)
   thumbnailBackfillIds.delete(id)
   thumbnailBackfillRunningIds.delete(id)
+  thumbnailBackfillFailureCounts.delete(id)
   thumbnailSubscribers.delete(id)
 }
 
@@ -240,6 +247,7 @@ export function clearImageCaches() {
   for (const id of imageObjectUrlCache.keys()) revokeObjectUrl(imageObjectUrlCache, id)
   for (const id of thumbnailObjectUrlCache.keys()) revokeObjectUrl(thumbnailObjectUrlCache, id)
   thumbnailBackfillIds.clear()
+  thumbnailBackfillFailureCounts.clear()
 }
 
 export async function ensureImageCached(id: string): Promise<string | undefined> {
@@ -321,18 +329,22 @@ export async function ensureImageThumbnailCached(id: string): Promise<ImageThumb
   }
 
   if (remoteImageThumbnailLoader) {
-    try {
-      const remote = await remoteImageThumbnailLoader(id)
-      if (remote) {
-        const small = await storeAndPublishImageThumbnail(remote)
-        if (small?.thumbnailDataUrl) {
-          const thumbnail = toImageThumbnail(small)
-          cacheThumbnail(id, thumbnail)
-          return thumbnail
+    // 远程缩略图接口可能尚未生成完成，最多尝试 3 次，失败按 500ms/1s/2s 退避后重试
+    for (let attempt = 0; attempt < THUMBNAIL_REMOTE_RETRY_LIMIT; attempt++) {
+      try {
+        const remote = await remoteImageThumbnailLoader(id)
+        if (remote) {
+          const small = await storeAndPublishImageThumbnail(remote)
+          if (small?.thumbnailDataUrl) {
+            const thumbnail = toImageThumbnail(small)
+            cacheThumbnail(id, thumbnail)
+            return thumbnail
+          }
         }
+      } catch {
+        // 服务端缩略图尚未完成时退避后重试。
       }
-    } catch {
-      // 服务端缩略图尚未完成时保留占位图，等待事件后重试。
+      if (attempt < THUMBNAIL_REMOTE_RETRY_LIMIT - 1) await delay(THUMBNAIL_REMOTE_RETRY_BACKOFF_MS[attempt])
     }
   }
   scheduleThumbnailBackfill([id], 'visible')
@@ -437,20 +449,30 @@ function getThumbnailConcurrencyForBatch(sizes: Array<{ width?: number; height?:
 
 async function startThumbnailBackfill(id: string) {
   thumbnailBackfillRunningIds.add(id)
+  let failed = false
 
   try {
-    if (getCachedThumbnail(id)) return
-
-    const thumbnail = await getImageThumbnail(id)
-    if (!thumbnail?.thumbnailDataUrl) return
-
-    // getImageThumbnail 已同步写入小档；旧格式大档（内联缩略图）则现场派生
-    const small = await deriveSmallImageThumbnail(thumbnail)
-    if (small?.thumbnailDataUrl) publishImageThumbnail(small)
+    if (!getCachedThumbnail(id)) {
+      const thumbnail = await getImageThumbnail(id)
+      // getImageThumbnail 已同步写入小档；旧格式大档（内联缩略图）则现场派生
+      const small = thumbnail?.thumbnailDataUrl ? await deriveSmallImageThumbnail(thumbnail) : undefined
+      if (small?.thumbnailDataUrl) {
+        publishImageThumbnail(small)
+        thumbnailBackfillFailureCounts.delete(id)
+      } else {
+        failed = true
+      }
+    }
   } catch {
-    // 缩略图生成失败时保留占位图，后续仍可再次补全。
+    failed = true
   } finally {
     thumbnailBackfillRunningIds.delete(id)
+    // 生成失败时重新入队兜底，累计失败超过上限后放弃，等待 thumbnail.ready 等事件再次触发
+    if (failed) {
+      const failures = (thumbnailBackfillFailureCounts.get(id) ?? 0) + 1
+      thumbnailBackfillFailureCounts.set(id, failures)
+      if (failures < THUMBNAIL_BACKFILL_RETRY_LIMIT) thumbnailBackfillIds.set(id, 'background')
+    }
     scheduleThumbnailBackfillTick()
   }
 }
