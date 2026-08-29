@@ -14,11 +14,12 @@ import { getContentEditableCursor, getContentEditablePlainText, getContentEditab
 import { useHintTooltip } from '../hooks/useHintTooltip'
 import { downloadImageEntriesAsZip, downloadImageIds, formatExportFileTime, getTaskOutputImageZipEntries } from '../lib/downloadImages'
 import SizePickerModal from './SizePickerModal'
-import { CloseIcon, CollapseIcon, ExpandIcon } from './icons'
+import { CloseIcon } from './icons'
 import ButtonTooltip from './input/buttonTooltip'
 import DragUploadOverlay from './input/dragUploadOverlay'
 import InputBatchBars from './input/inputBatchBars'
 import InputParamsPanel from './input/inputParamsPanel'
+import GenerationSheetDrawer from './input/GenerationSheetDrawer'
 import Select from './Select'
 
 /** API 支持的最大参考图数量 */
@@ -299,31 +300,21 @@ export default function InputBar() {
   const cameraInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
-  const imagesRef = useRef<HTMLDivElement>(null)
-  const prevHeightRef = useRef(42)
 
   const [isDragging, setIsDragging] = useState(false)
-  const [isSingleLine, setIsSingleLine] = useState(true)
-  const [promptExpanded, setPromptExpanded] = useState(false)
-  const [promptExpandedTop, setPromptExpandedTop] = useState(0)
-  const [promptCanExpand, setPromptCanExpand] = useState(false)
+  const [promptTall, setPromptTall] = useState(false)
   const [clearPromptHover, setClearPromptHover] = useState(false)
-  const [expandPromptHover, setExpandPromptHover] = useState(false)
   const [submitHover, setSubmitHover] = useState(false)
   const [attachHover, setAttachHover] = useState(false)
   const [imageHintId, setImageHintId] = useState<string | null>(null)
-  const [mobileCollapsed, setMobileCollapsed] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [showSizePicker, setShowSizePicker] = useState(false)
-  const [showMobileUploadMenu, setShowMobileUploadMenu] = useState(false)
   const [maskPreviewUrl, setMaskPreviewUrl] = useState('')
   const [imageDragIndex, setImageDragIndex] = useState<number | null>(null)
   const [imageDragOverIndex, setImageDragOverIndex] = useState<number | null>(null)
   const [atImageMenuIndex, setAtImageMenuIndex] = useState(0)
   const [atImageMenuDismissed, setAtImageMenuDismissed] = useState(false)
   const [touchDragPreview, setTouchDragPreview] = useState<{ src: string; x: number; y: number } | null>(null)
-  const handleRef = useRef<HTMLDivElement>(null)
-  const dragTouchRef = useRef({ startY: 0, moved: false })
-  const suppressHandleClickUntilRef = useRef(0)
   const imageDragIndexRef = useRef<number | null>(null)
   const imageTouchDragRef = useRef({ index: null as number | null, startX: 0, startY: 0, moved: false })
   const imageDragOverIndexRef = useRef<number | null>(null)
@@ -334,7 +325,6 @@ export default function InputBar() {
   const imageHintReleaseRef = useRef<(() => void) | null>(null)
   const [cursorPos, setCursorPos] = useState(0)
   const [menuLeft, setMenuLeft] = useState(0)
-  const showPromptExpand = promptExpanded || promptCanExpand
 
   const updateInputBarClearance = useCallback(() => {
     const bar = cardRef.current?.closest<HTMLElement>('[data-input-bar]')
@@ -368,25 +358,6 @@ export default function InputBar() {
     }
   }, [updateInputBarClearance])
 
-  useLayoutEffect(() => {
-    if (!promptExpanded) return
-
-    const header = document.querySelector<HTMLElement>('header')
-    if (!header) return
-
-    const updateTop = () => setPromptExpandedTop(Math.max(0, header.getBoundingClientRect().bottom) + 8)
-    const observer = new ResizeObserver(updateTop)
-    observer.observe(header)
-    updateTop()
-    window.addEventListener('resize', updateTop)
-    header.addEventListener('transitionend', updateTop)
-
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', updateTop)
-      header.removeEventListener('transitionend', updateTop)
-    }
-  }, [promptExpanded])
   const imageHintTimerRef = useRef<number | null>(null)
   const [outputCompressionInput, setOutputCompressionInput] = useState(
     params.output_compression == null ? '' : String(params.output_compression),
@@ -936,49 +907,6 @@ export default function InputBar() {
     }
   }, [addInputImage, showToast])
 
-  const adjustTextareaHeight = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-
-    // 计算图片区域等固定高度
-    const imagesHeight = imagesRef.current?.offsetHeight ?? 0
-    const fixedOverhead = imagesHeight + 140
-
-    // 展开时填满卡片的剩余空间，普通状态最多占页面的 40%。
-    const normalMaxH = Math.max(window.innerHeight * 0.4 - fixedOverhead, 80)
-    const maxH = promptExpanded
-      ? Math.max(el.parentElement?.clientHeight ?? 0, 80)
-      : normalMaxH
-
-    // 1. 清零高度以获取真实文本高度
-    el.style.transition = 'none'
-    el.style.height = '0'
-    el.style.overflowY = 'hidden'
-    const scrollH = el.scrollHeight
-
-    const placeholderEl = el.parentElement?.querySelector('.prompt-placeholder')
-    const placeholderH = placeholderEl ? placeholderEl.scrollHeight : 0
-    const minH = Math.max(42, placeholderH)
-
-    const desired = Math.max(scrollH, minH)
-    const targetH = desired > maxH ? maxH : desired
-
-    // 判断是否为单行
-    setIsSingleLine(desired <= minH)
-    setPromptCanExpand(desired > normalMaxH)
-
-    // 2. 回设旧高度并重绘以准备触发动画
-    el.style.height = prevHeightRef.current + 'px'
-    void el.offsetHeight
-
-    // 3. 恢复平滑过渡并设置新目标高度
-    el.style.transition = 'height 150ms ease, border-color 200ms, box-shadow 200ms'
-    el.style.height = targetH + 'px'
-    el.style.overflowY = desired > maxH ? 'auto' : 'hidden'
-
-    prevHeightRef.current = targetH
-  }, [promptExpanded])
-
   // 同步 prompt 至 contentEditable
   useEffect(() => {
     const el = textareaRef.current
@@ -1017,9 +945,12 @@ export default function InputBar() {
     }
   }, [prompt, inputImages])
 
-  useEffect(() => {
-    adjustTextareaHeight()
-  }, [prompt, inputImages, adjustTextareaHeight, isMobile, mobileCollapsed, promptExpanded])
+  // 测量输入框是否为多行，用于清空按钮定位
+  useLayoutEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    setPromptTall(el.scrollHeight > 56)
+  }, [prompt, inputImages, maskPreviewUrl])
 
   // 监听 selectionchange 更新光标位置（onSelect 在 contentEditable 下不可靠）
   useEffect(() => {
@@ -1072,42 +1003,6 @@ export default function InputBar() {
     document.addEventListener('mousedown', handleGlobalMouseDown, true)
     return () => {
       document.removeEventListener('mousedown', handleGlobalMouseDown, true)
-    }
-  }, [])
-  useEffect(() => {
-    adjustTextareaHeight()
-  }, [inputImages.length, Boolean(maskDraft), maskPreviewUrl, adjustTextareaHeight])
-
-  useEffect(() => {
-    window.addEventListener('resize', adjustTextareaHeight)
-    return () => window.removeEventListener('resize', adjustTextareaHeight)
-  }, [adjustTextareaHeight])
-
-  // 移动端拖动条手势
-  useEffect(() => {
-    const el = handleRef.current
-    if (!el) return
-    const onTouchStart = (e: TouchEvent) => {
-      dragTouchRef.current = { startY: e.touches[0].clientY, moved: false }
-    }
-    const onTouchMove = (e: TouchEvent) => {
-      const dy = e.touches[0].clientY - dragTouchRef.current.startY
-      if (Math.abs(dy) > 10) dragTouchRef.current.moved = true
-      if (dy > 30) setMobileCollapsed(true)
-      if (dy < -30) setMobileCollapsed(false)
-    }
-    const onTouchEnd = () => {
-      if (dragTouchRef.current.moved) {
-        suppressHandleClickUntilRef.current = Date.now() + 500
-      }
-    }
-    el.addEventListener('touchstart', onTouchStart, { passive: true })
-    el.addEventListener('touchmove', onTouchMove, { passive: true })
-    el.addEventListener('touchend', onTouchEnd)
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart)
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('touchend', onTouchEnd)
     }
   }, [])
 
@@ -1425,7 +1320,7 @@ export default function InputBar() {
 
   const renderImageThumbs = () => {
     return (
-      <div ref={imagesRef}>
+      <div>
         <div className="grid grid-cols-[repeat(auto-fill,52px)] justify-between gap-x-2 gap-y-3 mb-3">
           {inputImages.map((img, idx) => renderImageThumb(img, idx))}
           {renderClearAllButton()}
@@ -1486,7 +1381,7 @@ export default function InputBar() {
   )
 
   const renderGenerationSelector = () => generationChoices.length > 0 ? (
-    <div className="mb-3 flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">生图配置</span>
       <Select
         value={selectedGenerationChoice?.value ?? generationChoices[0].value}
@@ -1507,6 +1402,13 @@ export default function InputBar() {
   const showFavoriteCollectionBatchBar = inCollectionOverview && selectedFavoriteCollectionIds.length > 0
   const showTaskBatchBar = !showFavoriteCollectionBatchBar && selectedTaskIds.length > 0
 
+  const pillSummary = [
+    selectedGenerationChoice?.label ?? '未选择生图配置',
+    displaySize,
+    `×${params.n}`,
+    batchCount > 1 ? `批次 ${batchCount}` : null,
+  ].filter(Boolean).join(' · ')
+
   return (
     <>
       <DragUploadOverlay visible={isDragging} atImageLimit={atImageLimit} maxImages={API_MAX_IMAGES} />
@@ -1521,66 +1423,13 @@ export default function InputBar() {
         />
       )}
 
-      <div
-        data-input-bar
-        className={`fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4 transition-all duration-300${promptExpanded ? ' flex flex-col' : ''}`}
-        style={promptExpanded ? { top: `${promptExpandedTop}px`, transitionProperty: 'none' } : undefined}
-      >
-        <InputBatchBars
-          showFavoriteCollectionBatchBar={showFavoriteCollectionBatchBar}
-          showTaskBatchBar={showTaskBatchBar}
-          selectedTaskIds={selectedTaskIds}
-          tasks={tasks}
-          clearFavoriteCollectionSelection={clearFavoriteCollectionSelection}
-          onSelectAllVisibleFavoriteCollections={handleSelectAllVisibleFavoriteCollections}
-          onInvertVisibleFavoriteCollections={handleInvertVisibleFavoriteCollections}
-          onDownloadSelectedFavoriteCollections={handleDownloadSelectedFavoriteCollections}
-          onDeleteSelectedFavoriteCollections={handleDeleteSelectedFavoriteCollections}
-          clearSelection={clearSelection}
-          onSelectAllVisibleTasks={handleSelectAllVisibleTasks}
-          onInvertVisibleTasks={handleInvertVisibleTasks}
-          onToggleFavorite={handleToggleFavorite}
-          onDownloadSelected={handleDownloadSelected}
-          onDeleteSelected={handleDeleteSelected}
-        />
-        <div ref={cardRef} className={`bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] rounded-2xl sm:rounded-3xl p-3 sm:p-4 ring-1 ring-black/5 dark:ring-white/10${promptExpanded ? ' flex min-h-0 flex-1 flex-col' : ''}`}>
-          {/* 移动端拖动条 */}
-          <div
-            ref={handleRef}
-            className={promptExpanded ? 'hidden' : 'sm:hidden flex justify-center pt-0.5 pb-2 -mt-1 cursor-pointer touch-none'}
-            onClick={() => {
-              if (Date.now() < suppressHandleClickUntilRef.current) {
-                suppressHandleClickUntilRef.current = 0
-                return
-              }
-              setMobileCollapsed((v) => !v)
-            }}
-          >
-            <div className={`w-10 h-1 rounded-full bg-gray-300 dark:bg-white/[0.06] transition-transform duration-200 ${mobileCollapsed ? 'scale-x-75' : ''}`} />
-          </div>
-
-          {/* 输入图片行（移动端可折叠） */}
-          {inputImages.length > 0 && (
-            isMobile ? (
-              <>
-                <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
-                  <div className="collapse-inner">
-                    {renderImageThumbs()}
-                  </div>
-                </div>
-                {mobileCollapsed && (
-                  <div className="text-xs text-gray-400 dark:text-gray-500 mb-2 ml-1">
-                    {maskDraft ? `1 张遮罩主图 · ${referenceImages.length} 张参考图` : `${inputImages.length} 张参考图`}
-                  </div>
-                )}
-              </>
-            ) : (
-              renderImageThumbs()
-            )
-          )}
+      <GenerationSheetDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <div data-input-bar>
+          {/* 输入图片行 */}
+          {inputImages.length > 0 && renderImageThumbs()}
 
           {/* 输入框 */}
-          <div className={`relative grid${promptExpanded ? ' min-h-0 flex-1' : ''}`}>
+          <div className="relative grid">
             {showAtImageMenu && (
               <div style={{ left: `${menuLeft}px` }} className="absolute bottom-full z-50 mb-2 w-64 overflow-hidden rounded-2xl border border-gray-200/70 bg-white/95 p-1.5 shadow-xl ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:ring-white/10">
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-gray-400 dark:text-gray-500">选择图片引用</div>
@@ -1652,19 +1501,17 @@ export default function InputBar() {
                 syncMentionTagSelection(el)
               }}
               aria-label={promptPlaceholder}
-              className={`col-start-1 row-start-1 min-h-[42px] w-full overflow-hidden ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30${promptExpanded ? ' !h-full !overflow-y-auto' : ''}`}
+              className="col-start-1 row-start-1 max-h-[38vh] min-h-[42px] w-full overflow-y-auto ios-rounded-scroll-fix whitespace-pre-wrap break-words rounded-2xl border border-gray-200/60 bg-white/50 pl-4 pr-10 py-3 text-sm leading-relaxed shadow-sm outline-none transition-[border-color,box-shadow] duration-200 focus:ring-1 focus:ring-blue-300/40 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-100 dark:focus:ring-blue-500/30"
             />
             {prompt.length === 0 && (
-              <div className={`prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500${
-                isMobile && mobileCollapsed ? ' truncate' : ''
-              }`}>
+              <div className="prompt-placeholder col-start-1 row-start-1 pointer-events-none pl-4 pr-10 py-3 text-sm leading-relaxed text-gray-400 dark:text-gray-500">
                 {promptPlaceholder}
               </div>
             )}
             {prompt.length > 0 && (
               <div
                 className={`absolute z-10 ${
-                  isSingleLine ? 'right-3 top-1/2 -translate-y-1/2' : 'right-3 top-3'
+                  promptTall ? 'right-3 top-3' : 'right-3 top-1/2 -translate-y-1/2'
                 }`}
                 onMouseEnter={() => setClearPromptHover(true)}
                 onMouseLeave={() => setClearPromptHover(false)}
@@ -1683,180 +1530,47 @@ export default function InputBar() {
                 </button>
               </div>
             )}
-            {showPromptExpand && (
-              <div
-                className="absolute bottom-2.5 right-2.5 z-10"
-                onMouseEnter={() => setExpandPromptHover(true)}
-                onMouseLeave={() => setExpandPromptHover(false)}
-              >
-                <ButtonTooltip visible={expandPromptHover} text={promptExpanded ? '恢复输入框' : '展开输入框'} />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setExpandPromptHover(false)
-                    setPromptExpanded((expanded) => !expanded)
-                    setMobileCollapsed(false)
-                  }}
-                  className="flex items-center justify-center rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus:outline-none dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-                  aria-label={promptExpanded ? '恢复输入框' : '展开输入框'}
-                  aria-pressed={promptExpanded}
-                >
-                  {promptExpanded ? <CollapseIcon className="h-4 w-4" /> : <ExpandIcon className="h-4 w-4" />}
-                </button>
-              </div>
-            )}
           </div>
 
-          {/* 参数 + 按钮 */}
+          {/* 上传 + 生图配置 + 参数 */}
           <div className="mt-3">
-            {renderGenerationSelector()}
-            {/* 桌面端布局 */}
-            <div className="hidden sm:flex items-end justify-between gap-3">
-              {renderParams('grid-cols-6')}
-
-              <div className="flex gap-2 flex-shrink-0 mb-0.5">
-                <div
-                  className="relative"
-                  onMouseEnter={() => setAttachHover(true)}
-                  onMouseLeave={() => setAttachHover(false)}
+            <div className="flex items-center gap-2">
+              <div
+                className="relative flex-shrink-0"
+                onMouseEnter={() => setAttachHover(true)}
+                onMouseLeave={() => setAttachHover(false)}
+              >
+                <ButtonTooltip visible={attachHover} text={uploadImageTooltipText} />
+                <button
+                  onClick={() => !atImageLimit && fileInputRef.current?.click()}
+                  className={`p-2 rounded-xl transition-all shadow-sm ${
+                    atImageLimit
+                      ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
+                      : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
+                  }`}
+                  aria-label={uploadImageTooltipText}
                 >
-                  <ButtonTooltip visible={attachHover} text={uploadImageTooltipText} />
-                  <button
-                    onClick={() => !atImageLimit && fileInputRef.current?.click()}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm ${
-                      atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow'
-                    }`}
-                    aria-label={uploadImageTooltipText}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                    </svg>
-                  </button>
-                </div>
-                <div
-                  className="relative"
-                  onMouseEnter={() => setSubmitHover(true)}
-                  onMouseLeave={() => setSubmitHover(false)}
-                >
-                  <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text={submitTooltipText} />
-                  <button
-                    onClick={() => hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
-                    disabled={hasSubmitApiConfig ? !canSubmit : false}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm hover:shadow ${
-                      !hasSubmitApiConfig
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
-                    }`}
-                    aria-label={submitButtonAriaLabel}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                  </button>
-                </div>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex-shrink-0 p-2 rounded-xl transition-all shadow-sm bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300 hover:shadow sm:hidden"
+                aria-label="拍照上传"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </button>
+              <div className="min-w-0 flex-1">
+                {renderGenerationSelector()}
               </div>
             </div>
-
-            {/* 移动端布局 */}
-            <div className="sm:hidden flex flex-col gap-2">
-              <div className={`collapse-section${mobileCollapsed ? ' collapsed' : ''}`}>
-                <div className="collapse-inner">
-                  {renderParams('grid-cols-2')}
-                  <div className="h-2" />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div
-                  className="relative"
-                  onMouseEnter={() => setAttachHover(true)}
-                  onMouseLeave={() => setAttachHover(false)}
-                >
-                  <button
-                    onClick={() => {
-                      if (!atImageLimit) {
-                        setShowMobileUploadMenu(!showMobileUploadMenu)
-                      }
-                    }}
-                    className={`p-2.5 rounded-xl transition-all shadow-sm flex-shrink-0 ${
-                      atImageLimit
-                        ? 'bg-gray-200 dark:bg-white/[0.04] text-gray-300 dark:text-gray-500 cursor-not-allowed'
-                        : 'bg-gray-200 dark:bg-white/[0.06] hover:bg-gray-300 dark:hover:bg-white/[0.1] text-gray-500 dark:text-gray-300'
-                    }`}
-                    aria-label={uploadImageTooltipText}
-                  >
-                    <svg
-                      className={`w-5 h-5 transition-transform duration-200 ${showMobileUploadMenu ? 'rotate-90' : ''}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                  </button>
-
-                  {/* Mobile Upload Menu */}
-                  {showMobileUploadMenu && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-40"
-                        onClick={() => setShowMobileUploadMenu(false)}
-                      />
-                      <div className="absolute bottom-full left-0 mb-2 w-32 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
-                        <button
-                          className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
-                          onClick={() => {
-                            setShowMobileUploadMenu(false)
-                            cameraInputRef.current?.click()
-                          }}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                          </svg>
-                          拍照
-                        </button>
-                        <button
-                          className="w-full px-4 py-3 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-2 transition-colors"
-                          onClick={() => {
-                            setShowMobileUploadMenu(false)
-                            fileInputRef.current?.click()
-                          }}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                          </svg>
-                          上传图片
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div
-                  className="relative flex-1"
-                  onMouseEnter={() => setSubmitHover(true)}
-                  onMouseLeave={() => setSubmitHover(false)}
-                >
-                  <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text={submitTooltipText} />
-                  <button
-                    onClick={() => hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
-                    disabled={hasSubmitApiConfig ? !canSubmit : false}
-                    aria-label={submitButtonAriaLabel}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all shadow-sm ${
-                      !hasSubmitApiConfig
-                        ? 'bg-gray-300 dark:bg-white/[0.06] text-white cursor-pointer'
-                        : 'bg-blue-500 text-white hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-white/[0.04] disabled:opacity-50 disabled:cursor-not-allowed'
-                    }`}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                    </svg>
-                    {maskDraft ? '遮罩编辑' : '生成图像'}
-                  </button>
-                </div>
-              </div>
+            <div className="mt-3">
+              {renderParams('grid-cols-2 sm:grid-cols-6')}
             </div>
           </div>
 
@@ -1876,6 +1590,67 @@ export default function InputBar() {
             className="hidden"
             onChange={handleFileUpload}
           />
+        </div>
+      </GenerationSheetDrawer>
+
+      {/* 底部悬浮操作条：左半边打开参数抽屉，右半边发送生图请求 */}
+      <div data-input-bar className="fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-30 w-full max-w-4xl px-3 sm:px-4">
+        <InputBatchBars
+          showFavoriteCollectionBatchBar={showFavoriteCollectionBatchBar}
+          showTaskBatchBar={showTaskBatchBar}
+          selectedTaskIds={selectedTaskIds}
+          tasks={tasks}
+          clearFavoriteCollectionSelection={clearFavoriteCollectionSelection}
+          onSelectAllVisibleFavoriteCollections={handleSelectAllVisibleFavoriteCollections}
+          onInvertVisibleFavoriteCollections={handleInvertVisibleFavoriteCollections}
+          onDownloadSelectedFavoriteCollections={handleDownloadSelectedFavoriteCollections}
+          onDeleteSelectedFavoriteCollections={handleDeleteSelectedFavoriteCollections}
+          clearSelection={clearSelection}
+          onSelectAllVisibleTasks={handleSelectAllVisibleTasks}
+          onInvertVisibleTasks={handleInvertVisibleTasks}
+          onToggleFavorite={handleToggleFavorite}
+          onDownloadSelected={handleDownloadSelected}
+          onDeleteSelected={handleDeleteSelected}
+        />
+        <div ref={cardRef} className="flex items-stretch rounded-2xl sm:rounded-full bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] p-1.5 ring-1 ring-black/5 dark:ring-white/10">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="打开生图参数抽屉"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-xl sm:rounded-full px-3 py-1.5 text-left transition-colors hover:bg-gray-100/70 dark:hover:bg-white/[0.05]"
+          >
+            <svg className="h-5 w-5 shrink-0 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+            </svg>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-medium text-gray-700 dark:text-gray-200">{maskDraft ? '遮罩编辑' : '生图参数'}</span>
+              <span className="block truncate text-[11px] text-gray-400 dark:text-gray-500">{pillSummary}</span>
+            </span>
+            {inputImages.length > 0 && (
+              <span className="shrink-0 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-300">
+                {maskDraft ? `1+${referenceImages.length}` : inputImages.length} 图
+              </span>
+            )}
+          </button>
+          <div className="my-2 w-px self-stretch bg-gray-200/80 dark:bg-white/[0.08]" aria-hidden="true" />
+          <div
+            className="relative flex items-center pl-1 pr-0.5"
+            onMouseEnter={() => setSubmitHover(true)}
+            onMouseLeave={() => setSubmitHover(false)}
+          >
+            <ButtonTooltip visible={!hasSubmitApiConfig && submitHover} text={submitTooltipText} />
+            <button
+              type="button"
+              onClick={() => hasSubmitApiConfig ? submitCurrentMode() : setShowSettings(true)}
+              disabled={hasSubmitApiConfig ? !canSubmit : false}
+              aria-label={submitButtonAriaLabel}
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500 text-white shadow-sm transition-all hover:bg-blue-600 hover:shadow disabled:cursor-not-allowed disabled:bg-gray-300 dark:disabled:bg-white/[0.06] disabled:opacity-60"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </>
