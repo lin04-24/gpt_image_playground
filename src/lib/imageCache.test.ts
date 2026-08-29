@@ -5,6 +5,7 @@ const db = vi.hoisted(() => ({
   CURRENT_SMALL_THUMBNAIL_VERSION: 1,
   getImage: vi.fn(),
   getImageThumbnail: vi.fn(),
+  getStoredImageThumbnail: vi.fn(),
   getStoredFreshImageThumbnail: vi.fn(),
   getStoredFreshSmallImageThumbnail: vi.fn(),
   deriveSmallImageThumbnail: vi.fn(),
@@ -34,6 +35,7 @@ describe('imageCache', () => {
     vi.clearAllMocks()
     db.getImage.mockResolvedValue(undefined)
     db.getImageThumbnail.mockResolvedValue(undefined)
+    db.getStoredImageThumbnail.mockResolvedValue(undefined)
     db.getStoredFreshImageThumbnail.mockResolvedValue(undefined)
     db.getStoredFreshSmallImageThumbnail.mockResolvedValue(undefined)
     db.deriveSmallImageThumbnail.mockImplementation(async (large: { id: string; thumbnailDataUrl: string; width?: number; height?: number }) => ({
