@@ -146,6 +146,18 @@ body.drag-selecting * {
   opacity: 0.9;
 }
 
+/* 悬停阴影增强：hover 只平滑放大卡片投影深度，不位移不改排版；
+   过渡走卡片自身的 transition-[box-shadow]，reduce-motion 生效时由全局降级规则即时呈现 */
+.task-card:hover {
+  box-shadow: 0 20px 35px -5px rgba(0, 0, 0, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  .task-card:hover {
+    box-shadow: 0 20px 35px -5px rgba(0, 0, 0, 0.55);
+  }
+}
+
 /* 无障碍联动：reduce-motion 生效时隐藏光柱，避免动画冻结后残留一段静止渐变 */
 html.reduce-motion .border-beam-overlay {
   display: none;
