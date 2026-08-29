@@ -1,7 +1,7 @@
 import type { AppSettings, InputDraft } from '../types'
 import { blobToDataUrl } from './dataUrl'
 import { CURRENT_THUMBNAIL_VERSION, getAllImageIds, getAllTasks, getImage, putTask } from './db'
-import { clearImageCaches, ensureImageCached, setRemoteImageLoader, setRemoteImageThumbnailLoader } from './imageCache'
+import { clearImageCaches, deleteImageCacheEntry, ensureImageCached, ensureImageThumbnailCached, setRemoteImageLoader, setRemoteImageThumbnailLoader } from './imageCache'
 import { isEmptyInputDraft, normalizeInputDraft, restoreGalleryInputDraftState } from './inputDraftState'
 import { BACKEND_PAGE_SIZE, backendImageUrl, finalizeBackendBrowserMigration, getBackendAppState, getBackendFavoriteCollections, getBackendMigrationStatus, getBackendProfiles, getBackendTasks, migrateBackendBrowserImage, migrateBackendBrowserManifest, migrateBackendBrowserTasks, putBackendAppState, subscribeBackendEvents, uploadBackendImage, upsertBackendProfile } from './backendApi'
 import { useStore } from '../store'
@@ -218,7 +218,21 @@ export function startBackendSync() {
   })
   stopEvents = subscribeBackendEvents((event) => {
     if (event.type === 'sync.required' || event.type.startsWith('task.') || event.type === 'favorite.updated') void synchronizeBackendData().catch((error) => console.warn('Backend refresh failed:', error))
-    if (event.type === 'thumbnail.ready') clearImageCaches()
+    // 只失效对应图片的缓存并重新拉取缩略图；全量清空会让所有可见卡片重新回源
+    if (event.type === 'thumbnail.ready') {
+      let imageId = ''
+      try {
+        imageId = String((JSON.parse(event.data) as { imageId?: unknown })?.imageId || '')
+      } catch {
+        imageId = ''
+      }
+      if (!imageId) {
+        clearImageCaches()
+        return
+      }
+      deleteImageCacheEntry(imageId)
+      void ensureImageThumbnailCached(imageId).catch(() => undefined)
+    }
   })
   void getBackendFavoriteCollections().then((collections) => {
     const now = Date.now()
