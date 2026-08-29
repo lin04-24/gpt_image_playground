@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useRef, type ReactNode } from 'react'
+import { memo, useEffect, useState, useRef, type CSSProperties, type ReactNode } from 'react'
 import type { TaskRecord } from '../types'
 import { useStore, retryTask } from '../store'
 import { ensureImageThumbnailCached, ensureImageThumbnailObjectUrl, subscribeImageThumbnail } from '../lib/imageCache'
@@ -92,6 +92,8 @@ function TaskCard({
   const swipeFrameRef = useRef<number | null>(null)
   const spotlightPointRef = useRef<{ x: number; y: number } | null>(null)
   const spotlightFrameRef = useRef<number | null>(null)
+  // 占位任务替换为服务端任务时可能重新挂载，用页面时钟相位让光环接续当前进度
+  const beamAnimationDelayRef = useRef(`${-(Date.now() % 3000)}ms`)
 
   const updateSwipeDirection = (nextDirection: -1 | 0 | 1) => {
     if (swipeDirectionRef.current === nextDirection) return
@@ -355,7 +357,13 @@ function TaskCard({
   return (
     <div className="relative rounded-xl">
       {/* 生成中：流光环形边框光柱 */}
-      {(task.status === 'running' || isQueued) && <div className="border-beam-overlay" aria-hidden="true" />}
+      {(task.status === 'running' || isQueued) && (
+        <div
+          className="border-beam-overlay"
+          style={{ '--border-beam-delay': beamAnimationDelayRef.current } as CSSProperties}
+          aria-hidden="true"
+        />
+      )}
       {/* 侧滑底图 */}
       <div
         className={`absolute inset-0 rounded-xl flex items-center transition-opacity duration-200 pointer-events-none ${

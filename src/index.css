@@ -133,6 +133,7 @@ body.drag-selecting * {
   mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   animation: border-beam-spin 3s linear infinite;
+  animation-delay: var(--border-beam-delay, 0ms);
 }
 
 /* 第一层是 2px 光柱本体，第二层加宽并高斯模糊形成光晕 */
