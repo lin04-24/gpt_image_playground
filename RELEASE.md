@@ -1,3 +1,20 @@
+# V2.4.1（2026-08-29）
+
+### 性能
+- 两项持久化开销削减，消除画遮罩后打字卡顿：
+  - `persist` 的 localStorage 写入加防抖：新增 `src/lib/persistStorage.ts`，连续 `set()` 在 500ms 内合并为一次写入，页面隐藏（`visibilitychange hidden`）或关闭（`pagehide`）时冲刷未落盘数据，页签关闭不丢数据。此前 zustand persist 默认每次 `set()` 都同步 `JSON.stringify` 并整段写入 localStorage。
+  - 遮罩草稿不再把全分辨率 PNG base64 写进 localStorage：画完遮罩后异步 `storeImage` 入 IndexedDB 并回填 `maskImageId`，持久化草稿时 `maskDataUrl` 剥离为空串、只保留 `maskImageId`。入库前（毫秒级窗口）暂留原图，避免刚画完遮罩就关页签导致遮罩丢失。此前画了遮罩之后每敲一个字符都会同步序列化并写入多 MB 文本，明显卡顿且逼近 localStorage 5-10MB 配额。
+
+### 功能情况
+- 交互行为与数据语义不变：遮罩的绘制、预览、提交、复用任务遮罩等流程与原实现一致；遮罩图片按内容哈希去重，提交路径行为不变。
+- 恢复路径补齐：刷新后草稿遮罩按 `maskImageId` 从 IndexedDB/远端取回原图；旧版本持久化的完整 `maskDataUrl` 草稿仍正常恢复，随下一次写入自动收敛为新格式。
+- `cleanupUnreferencedImages` 把草稿遮罩 ID 计入引用，未随任务提交的遮罩记录不会被启动清理误删。
+- 未修改数据库结构（DB_VERSION 仍为 5）、云同步接口或 README，升级无需任何迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（33 个测试文件，254 项测试）。
+
 # V2.3.4（2026-08-29）
 
 ### 性能
