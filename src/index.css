@@ -69,6 +69,12 @@ body.drag-selecting * {
   user-select: none !important;
 }
 
+/* 跳过屏外卡片的渲染/布局，长列表滚动更流畅；高度估值对应卡片 h-40 + 边框 */
+.task-card-wrapper {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 10.25rem;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: 240 10% 4%;
