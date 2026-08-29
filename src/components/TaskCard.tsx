@@ -332,6 +332,8 @@ function TaskCard({
 
   return (
     <div className="relative rounded-xl">
+      {/* 生成中：流光环形边框光柱 */}
+      {task.status === 'running' && <div className="border-beam-overlay" aria-hidden="true" />}
       {/* 侧滑底图 */}
       <div
         className={`absolute inset-0 rounded-xl flex items-center transition-opacity duration-200 pointer-events-none ${

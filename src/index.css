@@ -91,6 +91,66 @@ body.drag-selecting * {
   animation: task-card-enter 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* 流光环形边框：生成中任务卡片的光柱，conic-gradient 沿边框匀速绕圈 */
+@property --border-beam-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes border-beam-spin {
+  to {
+    --border-beam-angle: 360deg;
+  }
+}
+
+.border-beam-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* mask 双层合成只保留边框环带：content-box 挖空内部，仅显示 padding 区域的渐变 */
+.border-beam-overlay::before,
+.border-beam-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--border-beam-angle),
+    transparent 0deg,
+    transparent 280deg,
+    #3b82f6 320deg,
+    #38bdf8 340deg,
+    #c084fc 355deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: border-beam-spin 3s linear infinite;
+}
+
+/* 第一层是 2px 光柱本体，第二层加宽并高斯模糊形成光晕 */
+.border-beam-overlay::before {
+  padding: 2px;
+}
+
+.border-beam-overlay::after {
+  padding: 3px;
+  filter: blur(4px);
+  opacity: 0.9;
+}
+
+/* 无障碍联动：reduce-motion 生效时隐藏光柱，避免动画冻结后残留一段静止渐变 */
+html.reduce-motion .border-beam-overlay {
+  display: none;
+}
+
 /* 无障碍降级：设置开启"遵循系统减少动态效果"且系统启用该模式时，压缩全局装饰性动画 */
 html.reduce-motion *,
 html.reduce-motion *::before,
