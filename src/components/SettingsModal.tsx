@@ -1118,7 +1118,7 @@ export default function SettingsModal() {
               type="button"
               onClick={saveSettings}
               disabled={!hasUnsavedChanges || isExportingData || isImportingData}
-              className="rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-gray-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               保存设置
             </button>
