@@ -1,7 +1,7 @@
 import { strFromU8, strToU8, type AsyncUnzipOptions, unzip, zip } from 'fflate'
 
 import type { AppSettings, ExportData, FavoriteCollection, StoredImage, StoredImageThumbnail, TaskRecord } from '../types'
-import { bytesToDataUrl, dataUrlToBytes } from './dataUrl'
+import { bytesToDataUrl, dataUrlToBlob, dataUrlToBytes } from './dataUrl'
 import { getNumberedFileNameBase, sanitizeFileNamePart } from './exportFileName'
 import { getDataUrlDecodedByteSize } from './imageApiShared'
 
@@ -60,7 +60,9 @@ export async function buildExportZip(params: BuildExportZipParams) {
 
   if (params.options.exportTasks) {
     for (const img of params.images) {
-      const { ext, bytes } = dataUrlToBytes(img.dataUrl)
+      const imageBlob = img.blob instanceof Blob ? img.blob : dataUrlToBlob(img.dataUrl)
+      const bytes = new Uint8Array(await imageBlob.arrayBuffer())
+      const ext = imageBlob.type.split('/')[1] || dataUrlToBytes(img.dataUrl).ext
       const path = getUniqueImagePath(imageFileNameBases.get(img.id) || `image-${img.id}`, ext, usedImagePaths)
       const pathBase = path.slice('images/'.length, -(ext.length + 1))
       const createdAt = img.createdAt ?? imageCreatedAtFallback.get(img.id) ?? params.exportedAt
@@ -74,8 +76,10 @@ export async function buildExportZip(params: BuildExportZipParams) {
       zipFiles[path] = [bytes, { mtime: new Date(createdAt), level: 0 }]
 
       const thumbnail = params.thumbnailsByImageId.get(img.id)
-      if (thumbnail?.thumbnailDataUrl) {
-        const { ext: thumbnailExt, bytes: thumbnailBytes } = dataUrlToBytes(thumbnail.thumbnailDataUrl)
+      if (thumbnail?.thumbnailDataUrl || thumbnail?.blob instanceof Blob) {
+        const thumbnailBlob = thumbnail.blob instanceof Blob ? thumbnail.blob : dataUrlToBlob(thumbnail.thumbnailDataUrl)
+        const thumbnailBytes = new Uint8Array(await thumbnailBlob.arrayBuffer())
+        const thumbnailExt = thumbnailBlob.type.split('/')[1] || dataUrlToBytes(thumbnail.thumbnailDataUrl).ext
         const thumbnailPath = `thumbnails/${pathBase}.${thumbnailExt}`
         imageFiles[img.id].width = imageFiles[img.id].width ?? thumbnail.width
         imageFiles[img.id].height = imageFiles[img.id].height ?? thumbnail.height
@@ -248,9 +252,9 @@ function getJsonEstimatedBytes(value: unknown) {
 }
 
 export function getExportImageEstimatedBytes(image: StoredImage, thumbnail?: StoredImageThumbnail) {
-  return getDataUrlDecodedByteSize(image.dataUrl)
-    + (thumbnail?.thumbnailDataUrl ? getDataUrlDecodedByteSize(thumbnail.thumbnailDataUrl) : 0)
-    + ZIP_ENTRY_OVERHEAD_BYTES * (thumbnail?.thumbnailDataUrl ? 2 : 1)
+  const imageBytes = image.blob instanceof Blob ? image.blob.size : getDataUrlDecodedByteSize(image.dataUrl)
+  const thumbnailBytes = thumbnail?.blob instanceof Blob ? thumbnail.blob.size : (thumbnail?.thumbnailDataUrl ? getDataUrlDecodedByteSize(thumbnail.thumbnailDataUrl) : 0)
+  return imageBytes + thumbnailBytes + ZIP_ENTRY_OVERHEAD_BYTES * (thumbnailBytes ? 2 : 1)
 }
 
 export function readExportZipFileAsDataUrl(files: Record<string, Uint8Array>, path: string): string | null {

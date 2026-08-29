@@ -248,7 +248,10 @@ export interface FavoriteCollection {
 
 export interface StoredImage {
   id: string
+  /** 兼容旧版记录；新记录写入时通常为空字符串，实际数据保存在 blob */
   dataUrl: string
+  /** 图片二进制数据。新记录优先使用此字段，避免在 IndexedDB 中保存膨胀的 base64 字符串 */
+  blob?: Blob
   /** 图片首次存储时间（ms） */
   createdAt?: number
   /** 图片来源：用户上传 / API 生成 / 遮罩 */
@@ -263,6 +266,8 @@ export interface StoredImageThumbnail {
   id: string
   /** 缩略图数据：网格 320 小档与详情占位 720 大档共用此结构，分库存放 */
   thumbnailDataUrl: string
+  /** 缩略图二进制数据。新记录优先使用此字段 */
+  blob?: Blob
   /** 原图宽度 */
   width?: number
   /** 原图高度 */

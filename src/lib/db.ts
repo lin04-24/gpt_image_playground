@@ -1,9 +1,9 @@
 import type { TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
 import { canvasToBlob } from './canvasImage'
-import { blobToDataUrl } from './dataUrl'
+import { blobToDataUrl, dataUrlToBlob } from './dataUrl'
 
 const DB_NAME = 'gpt-image-playground'
-const DB_VERSION = 5
+const DB_VERSION = 6
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'
 const STORE_THUMBNAILS = 'thumbnails'
@@ -122,6 +122,30 @@ export function getImage(id: string): Promise<StoredImage | undefined> {
   return dbTransaction(STORE_IMAGES, 'readonly', (s) => s.get(id))
 }
 
+/**
+ * 返回图片二进制数据，并在首次读取旧 dataUrl 记录时回填 Blob。
+ * 回填后的记录保留空 dataUrl 字段，避免继续把 base64 写回 IndexedDB。
+ */
+export async function getImageBlob(id: string): Promise<Blob | undefined> {
+  const image = await getImage(id)
+  if (!image) return undefined
+  if (isBlob(image.blob)) return image.blob
+  if (!image.dataUrl) return undefined
+
+  try {
+    const blob = dataUrlToBlob(image.dataUrl)
+    await putImage({ ...image, dataUrl: '', blob })
+    return blob
+  } catch {
+    return undefined
+  }
+}
+
+export async function getImageDataUrl(id: string): Promise<string | undefined> {
+  const image = await getImage(id)
+  return image ? ensureImageDataUrl(image) : undefined
+}
+
 export function getStoredImageThumbnail(id: string): Promise<StoredImageThumbnail | undefined> {
   return dbTransaction(STORE_THUMBNAILS, 'readonly', (s) => s.get(id))
 }
@@ -141,11 +165,38 @@ export async function getStoredFreshSmallImageThumbnail(id: string): Promise<Sto
 }
 
 export function putImageThumbnail(thumbnail: StoredImageThumbnail): Promise<IDBValidKey> {
-  return dbTransaction(STORE_THUMBNAILS, 'readwrite', (s) => s.put(thumbnail))
+  return normalizeThumbnail(thumbnail).then((normalized) =>
+    dbTransaction(STORE_THUMBNAILS, 'readwrite', (s) => s.put(normalized)),
+  )
 }
 
 export function putSmallImageThumbnail(thumbnail: StoredImageThumbnail): Promise<IDBValidKey> {
-  return dbTransaction(STORE_SMALL_THUMBNAILS, 'readwrite', (s) => s.put(thumbnail))
+  return normalizeThumbnail(thumbnail).then((normalized) =>
+    dbTransaction(STORE_SMALL_THUMBNAILS, 'readwrite', (s) => s.put(normalized)),
+  )
+}
+
+/** 读取缩略图二进制数据，并惰性迁移旧 dataUrl 记录。 */
+export async function getImageThumbnailBlob(id: string, small = false): Promise<Blob | undefined> {
+  const thumbnail = small ? await getStoredSmallImageThumbnail(id) : await getStoredImageThumbnail(id)
+  if (!thumbnail) return undefined
+  if (isBlob(thumbnail.blob)) return thumbnail.blob
+  if (!thumbnail.thumbnailDataUrl) return undefined
+
+  try {
+    const blob = dataUrlToBlob(thumbnail.thumbnailDataUrl)
+    const migrated = { ...thumbnail, thumbnailDataUrl: '', blob }
+    if (small) await putSmallImageThumbnail(migrated)
+    else await putImageThumbnail(migrated)
+    return blob
+  } catch {
+    return undefined
+  }
+}
+
+export async function getImageThumbnailDataUrl(id: string, small = false): Promise<string | undefined> {
+  const thumbnail = small ? await getStoredSmallImageThumbnail(id) : await getStoredImageThumbnail(id)
+  return thumbnail ? ensureThumbnailDataUrl(thumbnail) : undefined
 }
 
 export async function getImageThumbnail(id: string): Promise<StoredImageThumbnail | undefined> {
@@ -176,7 +227,9 @@ export async function getImageThumbnail(id: string): Promise<StoredImageThumbnai
     return thumbnail
   }
 
-  const metadata = await safeCreateImageThumbnail(image.dataUrl)
+  const imageDataUrl = await ensureImageDataUrl(image)
+  if (!imageDataUrl) return undefined
+  const metadata = await safeCreateImageThumbnail(imageDataUrl)
   if (!metadata.thumbnailDataUrl) return undefined
   const thumbnail: StoredImageThumbnail = {
     id,
@@ -200,7 +253,9 @@ export async function deriveSmallImageThumbnail(large: StoredImageThumbnail): Pr
   const existing = await getStoredSmallImageThumbnail(large.id)
   if (existing?.thumbnailVersion === SMALL_THUMBNAIL_VERSION) return existing
   try {
-    const image = await loadImage(large.thumbnailDataUrl)
+    const thumbnailDataUrl = await ensureThumbnailDataUrl(large)
+    if (!thumbnailDataUrl) return undefined
+    const image = await loadImage(thumbnailDataUrl)
     const scale = Math.min(1, SMALL_THUMBNAIL_MAX_SIZE / Math.max(image.naturalWidth, image.naturalHeight))
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
@@ -234,7 +289,9 @@ export function getAllImageIds(): Promise<string[]> {
 }
 
 export function putImage(image: StoredImage): Promise<IDBValidKey> {
-  return dbTransaction(STORE_IMAGES, 'readwrite', (s) => s.put(image))
+  return normalizeImage(image).then((normalized) =>
+    dbTransaction(STORE_IMAGES, 'readwrite', (s) => s.put(normalized)),
+  )
 }
 
 export function deleteImage(id: string): Promise<undefined> {
@@ -268,23 +325,54 @@ export function clearImages(): Promise<undefined> {
 // ===== Image hashing & dedup =====
 
 export async function hashDataUrl(dataUrl: string): Promise<string> {
+  try {
+    return await hashBlob(dataUrlToBlob(dataUrl))
+  } catch {
+    // 非 data URL（旧测试数据或外部占位值）继续按原字符串 hash。
+    return hashDataUrlLegacy(dataUrl)
+  }
+}
+
+/** 按图片字节计算 SHA-256，用于 Blob 存储及去重。 */
+export async function hashBlob(blob: Blob): Promise<string> {
   if (!globalThis.crypto?.subtle) {
-    return hashDataUrlFallback(dataUrl)
+    return hashBlobFallback(new Uint8Array(await blob.arrayBuffer()))
   }
 
-  const data = new TextEncoder().encode(dataUrl)
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
   return Array.from(new Uint8Array(hashBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
 
-function hashDataUrlFallback(dataUrl: string): string {
+function hashDataUrlLegacy(dataUrl: string): string {
   let h1 = 0x811c9dc5
   let h2 = 0x01000193
 
   for (let i = 0; i < dataUrl.length; i++) {
     const code = dataUrl.charCodeAt(i)
+    h1 ^= code
+    h1 = Math.imul(h1, 0x01000193)
+    h2 ^= code
+    h2 = Math.imul(h2, 0x27d4eb2d)
+  }
+
+  return `fallback-${(h1 >>> 0).toString(16).padStart(8, '0')}${(h2 >>> 0).toString(16).padStart(8, '0')}`
+}
+
+async function hashDataUrlText(dataUrl: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) return hashDataUrlLegacy(dataUrl)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(dataUrl))
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function hashBlobFallback(bytes: Uint8Array): string {
+  let h1 = 0x811c9dc5
+  let h2 = 0x01000193
+
+  for (const code of bytes) {
     h1 ^= code
     h1 = Math.imul(h1, 0x01000193)
     h2 ^= code
@@ -343,37 +431,96 @@ export async function storeImageWithSize(
   source: NonNullable<StoredImage['source']> = 'upload',
   opts: StoreImageOptions = {},
 ): Promise<StoreImageResult> {
-  const id = await hashDataUrl(dataUrl)
-  const existing = await getImage(id)
+  let blob: Blob | undefined
+  try {
+    blob = dataUrlToBlob(dataUrl)
+  } catch {
+    // 仅用于兼容非标准 dataUrl 的调用方；此类记录仍会保留原字符串。
+  }
+
+  const id = blob ? await hashBlob(blob) : await hashDataUrl(dataUrl)
+  // 兼容 6.0 之前按 dataUrl 文本生成的图片 ID。
+  const existing = (await getImage(id)) ?? (await getImage(await hashDataUrlText(dataUrl)))
+  const imageId = existing?.id ?? id
   if (!existing) {
     if (opts.skipThumbnail) {
-      await putImage({ id, dataUrl, createdAt: Date.now(), source })
-      return { id }
+      await putImage({ id: imageId, dataUrl, blob, createdAt: Date.now(), source })
+      return { id: imageId }
     }
     const thumbnail = await safeCreateImageThumbnail(dataUrl)
     await putImage({
-      id,
+      id: imageId,
       dataUrl,
+      blob,
       createdAt: Date.now(),
       source,
       width: thumbnail.width,
       height: thumbnail.height,
     })
-    await putThumbnailPair(id, thumbnail)
-    return { id, width: thumbnail.width, height: thumbnail.height }
+    await putThumbnailPair(imageId, thumbnail)
+    return { id: imageId, width: thumbnail.width, height: thumbnail.height }
   }
 
-  if (!opts.skipThumbnail && (await getStoredImageThumbnail(id))?.thumbnailVersion !== THUMBNAIL_VERSION) {
-    const thumbnail = await safeCreateImageThumbnail(existing.dataUrl)
+  if (!opts.skipThumbnail && (await getStoredImageThumbnail(imageId))?.thumbnailVersion !== THUMBNAIL_VERSION) {
+    const existingDataUrl = await ensureImageDataUrl(existing)
+    const thumbnail = existingDataUrl ? await safeCreateImageThumbnail(existingDataUrl) : {}
     const width = thumbnail.width ?? existing.width
     const height = thumbnail.height ?? existing.height
     if (thumbnail.width && thumbnail.height && (existing.width !== thumbnail.width || existing.height !== thumbnail.height)) {
       await putImage({ ...existing, width: thumbnail.width, height: thumbnail.height })
     }
-    await putThumbnailPair(id, thumbnail)
-    return { id, width, height }
+    await putThumbnailPair(imageId, thumbnail)
+    return { id: imageId, width, height }
   }
-  return { id, width: existing.width, height: existing.height }
+  return { id: imageId, width: existing.width, height: existing.height }
+}
+
+async function normalizeImage(image: StoredImage): Promise<StoredImage> {
+  if (isBlob(image.blob)) {
+    return { ...image, dataUrl: '' }
+  }
+  if (!image.dataUrl) return image
+  try {
+    return { ...image, dataUrl: '', blob: dataUrlToBlob(image.dataUrl) }
+  } catch {
+    return image
+  }
+}
+
+async function normalizeThumbnail(thumbnail: StoredImageThumbnail): Promise<StoredImageThumbnail> {
+  if (isBlob(thumbnail.blob)) {
+    return { ...thumbnail, thumbnailDataUrl: '' }
+  }
+  if (!thumbnail.thumbnailDataUrl) return thumbnail
+  try {
+    return { ...thumbnail, thumbnailDataUrl: '', blob: dataUrlToBlob(thumbnail.thumbnailDataUrl) }
+  } catch {
+    return thumbnail
+  }
+}
+
+async function ensureImageDataUrl(image: StoredImage): Promise<string | undefined> {
+  if (image.dataUrl) return image.dataUrl
+  if (!isBlob(image.blob)) return undefined
+  try {
+    return await blobToDataUrl(image.blob, image.blob.type || 'image/png')
+  } catch {
+    return undefined
+  }
+}
+
+async function ensureThumbnailDataUrl(thumbnail: StoredImageThumbnail): Promise<string | undefined> {
+  if (thumbnail.thumbnailDataUrl) return thumbnail.thumbnailDataUrl
+  if (!isBlob(thumbnail.blob)) return undefined
+  try {
+    return await blobToDataUrl(thumbnail.blob, thumbnail.blob.type || 'image/webp')
+  } catch {
+    return undefined
+  }
+}
+
+function isBlob(value: unknown): value is Blob {
+  return !!value && typeof (value as Blob).arrayBuffer === 'function' && typeof (value as Blob).size === 'number'
 }
 
 function loadImage(dataUrl: string): Promise<HTMLImageElement> {

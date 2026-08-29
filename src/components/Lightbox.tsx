@@ -5,7 +5,7 @@ import { useHintTooltip } from '../hooks/useHintTooltip'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { createMaskPreviewDataUrl } from '../lib/canvasImage'
 import { suppressGlobalClicks } from '../lib/clickSuppression'
-import { ensureImageCached, getCachedImage } from '../lib/imageCache'
+import { ensureImageCached, ensureImageObjectUrl, getCachedImage } from '../lib/imageCache'
 import ButtonTooltip from './input/buttonTooltip'
 import { EditIcon, RefreshIcon } from './icons'
 
@@ -56,13 +56,10 @@ export default function Lightbox() {
 
     const imageId = lightboxImageId
     const cached = getCachedImage(imageId)
-    if (cached) {
-      setSrc(cached)
-    } else {
-      ensureImageCached(imageId).then((url) => {
-        if (!cancelled && url) setSrc(url)
-      })
-    }
+    if (cached) setSrc(cached)
+    void ensureImageObjectUrl(imageId).then((url) => {
+      if (!cancelled && url) setSrc(url)
+    })
 
     return () => {
       cancelled = true

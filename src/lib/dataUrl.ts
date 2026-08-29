@@ -33,6 +33,20 @@ export async function blobToDataUrl(blob: Blob, fallbackMime = 'application/octe
   return `data:${blob.type || fallbackMime};base64,${bytesToBase64(new Uint8Array(await blob.arrayBuffer()))}`
 }
 
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const match = dataUrl.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/s)
+  if (!match) throw new Error('无效的图片 data URL')
+  const mime = match[1] || 'application/octet-stream'
+  const payload = match[2]
+  if (dataUrl.includes(';base64,')) {
+    const binary = atob(payload)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return new Blob([bytes], { type: mime })
+  }
+  return new Blob([decodeURIComponent(payload)], { type: mime })
+}
+
 export function fileToDataUrl(file: File): Promise<string> {
   return blobToDataUrl(file, file.type || 'application/octet-stream')
 }

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { deleteFavoriteCollection, useStore, submitTask, addImageFromFile, removeMultipleTasks, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
 import { getActiveApiProfile, getApiProviderLabel, getGenerationApiProfile, normalizeSettings } from '../lib/apiProfiles'
-import { ensureImageCached, getCachedImage } from '../lib/imageCache'
+import { ensureImageCached, ensureImageObjectUrl, getCachedImage } from '../lib/imageCache'
 import { DEFAULT_FAL_IMAGE_SIZE, getChangedParams, getOutputImageLimitForSettings, normalizeParamsForSettings } from '../lib/paramCompatibility'
 import { getAtImageQuery, getImageMentionLabel, getPromptIndexFromVisibleIndex, getPromptMentionParts, getSelectedImageMentionLabel, imageMentionMatches, insertImageMentionAtVisibleRange, isCursorInSelectedImageMention, stripImageMentionMarkers } from '../lib/promptImageMentions'
 import { normalizeCodexCliImageSize, normalizeImageSize } from '../lib/size'
@@ -51,7 +51,15 @@ function AtImageOptionThumb({ option }: { option: AtImageOption }) {
   const [src, setSrc] = useState(option.dataUrl || getCachedImage(option.imageId) || '')
 
   useEffect(() => {
-    setSrc(option.dataUrl || getCachedImage(option.imageId) || '')
+    let cancelled = false
+    const cached = option.dataUrl || getCachedImage(option.imageId) || ''
+    setSrc(cached)
+    void ensureImageObjectUrl(option.imageId).then((url) => {
+      if (!cancelled && url) setSrc(url)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [option])
 
   return (
