@@ -3,15 +3,21 @@ import { canvasToBlob } from './canvasImage'
 import { blobToDataUrl } from './dataUrl'
 
 const DB_NAME = 'gpt-image-playground'
-const DB_VERSION = 4
+const DB_VERSION = 5
 const STORE_TASKS = 'tasks'
 const STORE_IMAGES = 'images'
 const STORE_THUMBNAILS = 'thumbnails'
+const STORE_SMALL_THUMBNAILS = 'thumbnails_small'
 const THUMBNAIL_MAX_SIZE = 720
 const THUMBNAIL_QUALITY = 0.9
 const THUMBNAIL_VERSION = 2
+// 网格卡片显示宽度 160px，DPR=2 只需 320px；720 大档仅供详情弹窗占位与小档派生
+const SMALL_THUMBNAIL_MAX_SIZE = 320
+const SMALL_THUMBNAIL_QUALITY = 0.75
+const SMALL_THUMBNAIL_VERSION = 1
 
 export const CURRENT_THUMBNAIL_VERSION = THUMBNAIL_VERSION
+export const CURRENT_SMALL_THUMBNAIL_VERSION = SMALL_THUMBNAIL_VERSION
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -26,6 +32,9 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_THUMBNAILS)) {
         db.createObjectStore(STORE_THUMBNAILS, { keyPath: 'id' })
+      }
+      if (!db.objectStoreNames.contains(STORE_SMALL_THUMBNAILS)) {
+        db.createObjectStore(STORE_SMALL_THUMBNAILS, { keyPath: 'id' })
       }
     }
     req.onsuccess = () => resolve(req.result)
@@ -97,13 +106,26 @@ export function getStoredImageThumbnail(id: string): Promise<StoredImageThumbnai
   return dbTransaction(STORE_THUMBNAILS, 'readonly', (s) => s.get(id))
 }
 
+export function getStoredSmallImageThumbnail(id: string): Promise<StoredImageThumbnail | undefined> {
+  return dbTransaction(STORE_SMALL_THUMBNAILS, 'readonly', (s) => s.get(id))
+}
+
 export async function getStoredFreshImageThumbnail(id: string): Promise<StoredImageThumbnail | undefined> {
   const thumbnail = await getStoredImageThumbnail(id)
   return thumbnail?.thumbnailVersion === THUMBNAIL_VERSION ? thumbnail : undefined
 }
 
+export async function getStoredFreshSmallImageThumbnail(id: string): Promise<StoredImageThumbnail | undefined> {
+  const thumbnail = await getStoredSmallImageThumbnail(id)
+  return thumbnail?.thumbnailVersion === SMALL_THUMBNAIL_VERSION ? thumbnail : undefined
+}
+
 export function putImageThumbnail(thumbnail: StoredImageThumbnail): Promise<IDBValidKey> {
   return dbTransaction(STORE_THUMBNAILS, 'readwrite', (s) => s.put(thumbnail))
+}
+
+export function putSmallImageThumbnail(thumbnail: StoredImageThumbnail): Promise<IDBValidKey> {
+  return dbTransaction(STORE_SMALL_THUMBNAILS, 'readwrite', (s) => s.put(thumbnail))
 }
 
 export async function getImageThumbnail(id: string): Promise<StoredImageThumbnail | undefined> {
@@ -143,11 +165,42 @@ export async function getImageThumbnail(id: string): Promise<StoredImageThumbnai
     height: metadata.height,
     thumbnailVersion: THUMBNAIL_VERSION,
   }
-  await putImageThumbnail(thumbnail)
+  await putThumbnailPair(id, metadata)
   if (metadata.width && metadata.height && (image.width !== metadata.width || image.height !== metadata.height)) {
     await putImage({ ...image, width: metadata.width, height: metadata.height })
   }
   return thumbnail
+}
+
+/**
+ * 从 720 大档现场派生 320 网格小档并落库。用于存量数据回填，
+ * 避免为生成小档重新解码原图；已有新鲜小档时直接返回。
+ */
+export async function deriveSmallImageThumbnail(large: StoredImageThumbnail): Promise<StoredImageThumbnail | undefined> {
+  const existing = await getStoredSmallImageThumbnail(large.id)
+  if (existing?.thumbnailVersion === SMALL_THUMBNAIL_VERSION) return existing
+  try {
+    const image = await loadImage(large.thumbnailDataUrl)
+    const scale = Math.min(1, SMALL_THUMBNAIL_MAX_SIZE / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return undefined
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
+    const blob = await canvasToBlob(canvas, 'image/webp', SMALL_THUMBNAIL_QUALITY)
+    const small: StoredImageThumbnail = {
+      id: large.id,
+      thumbnailDataUrl: await blobToDataUrl(blob, 'image/webp'),
+      width: large.width,
+      height: large.height,
+      thumbnailVersion: SMALL_THUMBNAIL_VERSION,
+    }
+    await putSmallImageThumbnail(small)
+    return small
+  } catch {
+    return undefined
+  }
 }
 
 export function getAllImages(): Promise<StoredImage[]> {
@@ -168,9 +221,10 @@ export function deleteImage(id: string): Promise<undefined> {
   return openDB().then(
     (db) =>
       new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_IMAGES, STORE_THUMBNAILS], 'readwrite')
+        const tx = db.transaction([STORE_IMAGES, STORE_THUMBNAILS, STORE_SMALL_THUMBNAILS], 'readwrite')
         tx.objectStore(STORE_IMAGES).delete(id)
         tx.objectStore(STORE_THUMBNAILS).delete(id)
+        tx.objectStore(STORE_SMALL_THUMBNAILS).delete(id)
         tx.oncomplete = () => resolve(undefined)
         tx.onerror = () => reject(tx.error)
       }),
@@ -181,9 +235,10 @@ export function clearImages(): Promise<undefined> {
   return openDB().then(
     (db) =>
       new Promise((resolve, reject) => {
-        const tx = db.transaction([STORE_IMAGES, STORE_THUMBNAILS], 'readwrite')
+        const tx = db.transaction([STORE_IMAGES, STORE_THUMBNAILS, STORE_SMALL_THUMBNAILS], 'readwrite')
         tx.objectStore(STORE_IMAGES).clear()
         tx.objectStore(STORE_THUMBNAILS).clear()
+        tx.objectStore(STORE_SMALL_THUMBNAILS).clear()
         tx.oncomplete = () => resolve(undefined)
         tx.onerror = () => reject(tx.error)
       }),
@@ -242,6 +297,27 @@ export async function storeImage(
   return (await storeImageWithSize(dataUrl, source, opts)).id
 }
 
+// 同时写入 720 大档与 320 小档；任一档缺失则跳过对应写入
+async function putThumbnailPair(id: string, metadata: Partial<ImageThumbnailPair>) {
+  if (!metadata.thumbnailDataUrl) return
+  await putImageThumbnail({
+    id,
+    thumbnailDataUrl: metadata.thumbnailDataUrl,
+    width: metadata.width,
+    height: metadata.height,
+    thumbnailVersion: THUMBNAIL_VERSION,
+  })
+  if (metadata.smallThumbnailDataUrl) {
+    await putSmallImageThumbnail({
+      id,
+      thumbnailDataUrl: metadata.smallThumbnailDataUrl,
+      width: metadata.width,
+      height: metadata.height,
+      thumbnailVersion: SMALL_THUMBNAIL_VERSION,
+    })
+  }
+}
+
 export async function storeImageWithSize(
   dataUrl: string,
   source: NonNullable<StoredImage['source']> = 'upload',
@@ -263,15 +339,7 @@ export async function storeImageWithSize(
       width: thumbnail.width,
       height: thumbnail.height,
     })
-    if (thumbnail.thumbnailDataUrl) {
-      await putImageThumbnail({
-        id,
-        thumbnailDataUrl: thumbnail.thumbnailDataUrl,
-        width: thumbnail.width,
-        height: thumbnail.height,
-        thumbnailVersion: THUMBNAIL_VERSION,
-      })
-    }
+    await putThumbnailPair(id, thumbnail)
     return { id, width: thumbnail.width, height: thumbnail.height }
   }
 
@@ -282,15 +350,7 @@ export async function storeImageWithSize(
     if (thumbnail.width && thumbnail.height && (existing.width !== thumbnail.width || existing.height !== thumbnail.height)) {
       await putImage({ ...existing, width: thumbnail.width, height: thumbnail.height })
     }
-    if (thumbnail.thumbnailDataUrl) {
-      await putImageThumbnail({
-        id,
-        thumbnailDataUrl: thumbnail.thumbnailDataUrl,
-        width: thumbnail.width,
-        height: thumbnail.height,
-        thumbnailVersion: THUMBNAIL_VERSION,
-      })
-    }
+    await putThumbnailPair(id, thumbnail)
     return { id, width, height }
   }
   return { id, width: existing.width, height: existing.height }
@@ -305,7 +365,14 @@ function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   })
 }
 
-async function createImageThumbnail(dataUrl: string): Promise<Omit<StoredImageThumbnail, 'id'>> {
+interface ImageThumbnailPair {
+  thumbnailDataUrl: string
+  smallThumbnailDataUrl: string
+  width: number
+  height: number
+}
+
+async function createImageThumbnail(dataUrl: string): Promise<ImageThumbnailPair> {
   const image = await loadImage(dataUrl)
   const width = image.naturalWidth
   const height = image.naturalHeight
@@ -322,15 +389,25 @@ async function createImageThumbnail(dataUrl: string): Promise<Omit<StoredImageTh
   // toBlob 是异步编码，浏览器可把编码移出主线程，避免大图缩略图阻塞任务完成流程
   const thumbnailBlob = await canvasToBlob(canvas, 'image/webp', THUMBNAIL_QUALITY)
 
+  // 小档从 720 大档画布二次缩放，一次解码同时产出两档
+  const smallScale = Math.min(1, SMALL_THUMBNAIL_MAX_SIZE / Math.max(width, height))
+  const smallCanvas = document.createElement('canvas')
+  smallCanvas.width = Math.max(1, Math.round(width * smallScale))
+  smallCanvas.height = Math.max(1, Math.round(height * smallScale))
+  const smallCtx = smallCanvas.getContext('2d')
+  if (!smallCtx) throw new Error('当前浏览器不支持 Canvas')
+  smallCtx.drawImage(canvas, 0, 0, smallCanvas.width, smallCanvas.height)
+  const smallThumbnailBlob = await canvasToBlob(smallCanvas, 'image/webp', SMALL_THUMBNAIL_QUALITY)
+
   return {
     thumbnailDataUrl: await blobToDataUrl(thumbnailBlob, 'image/webp'),
+    smallThumbnailDataUrl: await blobToDataUrl(smallThumbnailBlob, 'image/webp'),
     width,
     height,
-    thumbnailVersion: THUMBNAIL_VERSION,
   }
 }
 
-async function safeCreateImageThumbnail(dataUrl: string): Promise<Partial<Omit<StoredImageThumbnail, 'id'>>> {
+async function safeCreateImageThumbnail(dataUrl: string): Promise<Partial<ImageThumbnailPair>> {
   try {
     return await createImageThumbnail(dataUrl)
   } catch {

@@ -3,7 +3,7 @@ import { useStore, reuseConfig, editOutputs, removeTask, showCodexCliPrompt, get
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { useTooltip } from '../hooks/useTooltip'
-import { ensureImageCached, ensureImageThumbnailCached, getCachedImage } from '../lib/imageCache'
+import { ensureImageCached, ensureLargeImageThumbnailCached, getCachedImage } from '../lib/imageCache'
 import { formatImageRatio } from '../lib/size'
 import { ActualValueBadge, DetailParamValue } from '../lib/paramDisplay'
 import { copyImageSourceToClipboard, copyTextToClipboard, getClipboardFailureMessage } from '../lib/clipboard'
@@ -193,7 +193,8 @@ export default function DetailModal() {
     setOutputPreviewSrcs(cached ? { [imageId]: cached } : {})
 
     if (!cached) {
-      ensureImageThumbnailCached(imageId)
+      // 详情预览保留 720 大档占位，等原图加载完成后替换
+      ensureLargeImageThumbnailCached(imageId)
         .then((thumbnail) => {
           if (cancelled || !thumbnail) return
           setOutputPreviewSrcs((prev) => prev[imageId] ? prev : { ...prev, [imageId]: thumbnail.dataUrl })

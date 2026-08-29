@@ -25,10 +25,12 @@ import {
   clearTasks as dbClearTasks,
   getImage,
   getStoredImageThumbnail,
+  getStoredSmallImageThumbnail,
   getImageThumbnail,
   getAllImageIds,
   putImage,
   putImageThumbnail,
+  putSmallImageThumbnail,
   deleteImage,
   clearImages,
   storeImage,
@@ -329,7 +331,11 @@ export async function deleteImageIfUnreferenced(imageId: string) {
 
 async function deleteStoredImageIfUnreferenced(imageId: string) {
   if (isImageReferencedByState(useStore.getState(), imageId)) return
-  const [image, thumbnail] = await Promise.all([getImage(imageId), getStoredImageThumbnail(imageId)])
+  const [image, thumbnail, smallThumbnail] = await Promise.all([
+    getImage(imageId),
+    getStoredImageThumbnail(imageId),
+    getStoredSmallImageThumbnail(imageId),
+  ])
   if (isImageReferencedByState(useStore.getState(), imageId)) return
 
   await deleteImage(imageId)
@@ -344,11 +350,14 @@ async function deleteStoredImageIfUnreferenced(imageId: string) {
   }
   if (thumbnail) {
     await putImageThumbnail(thumbnail)
-    cacheThumbnail(thumbnail.id, {
-      dataUrl: thumbnail.thumbnailDataUrl,
-      width: thumbnail.width,
-      height: thumbnail.height,
-      thumbnailVersion: thumbnail.thumbnailVersion,
+  }
+  if (smallThumbnail) {
+    await putSmallImageThumbnail(smallThumbnail)
+    cacheThumbnail(smallThumbnail.id, {
+      dataUrl: smallThumbnail.thumbnailDataUrl,
+      width: smallThumbnail.width,
+      height: smallThumbnail.height,
+      thumbnailVersion: smallThumbnail.thumbnailVersion,
     })
   }
 }
@@ -2233,12 +2242,6 @@ export async function exportData(options: ExportOptions = { exportConfig: true, 
         const thumbnail = await getImageThumbnail(id)
         if (!thumbnail?.thumbnailDataUrl) continue
         thumbnailsByImageId.set(id, thumbnail)
-        cacheThumbnail(id, {
-          dataUrl: thumbnail.thumbnailDataUrl,
-          width: thumbnail.width,
-          height: thumbnail.height,
-          thumbnailVersion: thumbnail.thumbnailVersion,
-        })
       }
 
       const partNumber = index + 1
@@ -2338,12 +2341,6 @@ export async function importData(input: File | File[], options: ImportOptions = 
           await putImageThumbnail({
             id,
             thumbnailDataUrl,
-            width: info.width,
-            height: info.height,
-            thumbnailVersion: info.thumbnailVersion,
-          })
-          cacheThumbnail(id, {
-            dataUrl: thumbnailDataUrl,
             width: info.width,
             height: info.height,
             thumbnailVersion: info.thumbnailVersion,

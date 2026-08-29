@@ -261,7 +261,7 @@ export interface StoredImage {
 
 export interface StoredImageThumbnail {
   id: string
-  /** 列表缩略图，用于避免卡片页解码完整 4K 原图 */
+  /** 缩略图数据：网格 320 小档与详情占位 720 大档共用此结构，分库存放 */
   thumbnailDataUrl: string
   /** 原图宽度 */
   width?: number
