@@ -225,18 +225,35 @@ export interface StoreImageResult {
   height?: number
 }
 
+export interface StoreImageOptions {
+  /** 跳过缩略图生成，用于流式中间图等短生命周期图片，省去一次大图解码编码 */
+  skipThumbnail?: boolean
+}
+
 /**
  * 存储图片，若已存在（按 hash 去重）则跳过。
  * 返回 image id 及图片真实宽高。
  */
-export async function storeImage(dataUrl: string, source: NonNullable<StoredImage['source']> = 'upload'): Promise<string> {
-  return (await storeImageWithSize(dataUrl, source)).id
+export async function storeImage(
+  dataUrl: string,
+  source: NonNullable<StoredImage['source']> = 'upload',
+  opts: StoreImageOptions = {},
+): Promise<string> {
+  return (await storeImageWithSize(dataUrl, source, opts)).id
 }
 
-export async function storeImageWithSize(dataUrl: string, source: NonNullable<StoredImage['source']> = 'upload'): Promise<StoreImageResult> {
+export async function storeImageWithSize(
+  dataUrl: string,
+  source: NonNullable<StoredImage['source']> = 'upload',
+  opts: StoreImageOptions = {},
+): Promise<StoreImageResult> {
   const id = await hashDataUrl(dataUrl)
   const existing = await getImage(id)
   if (!existing) {
+    if (opts.skipThumbnail) {
+      await putImage({ id, dataUrl, createdAt: Date.now(), source })
+      return { id }
+    }
     const thumbnail = await safeCreateImageThumbnail(dataUrl)
     await putImage({
       id,
@@ -258,7 +275,7 @@ export async function storeImageWithSize(dataUrl: string, source: NonNullable<St
     return { id, width: thumbnail.width, height: thumbnail.height }
   }
 
-  if ((await getStoredImageThumbnail(id))?.thumbnailVersion !== THUMBNAIL_VERSION) {
+  if (!opts.skipThumbnail && (await getStoredImageThumbnail(id))?.thumbnailVersion !== THUMBNAIL_VERSION) {
     const thumbnail = await safeCreateImageThumbnail(existing.dataUrl)
     const width = thumbnail.width ?? existing.width
     const height = thumbnail.height ?? existing.height

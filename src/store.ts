@@ -960,14 +960,16 @@ async function resolveImageSizeParamsList(
   })
 }
 
-function addTaskReferencedImageIds(target: Set<string>, task: TaskRecord) {
+function addTaskReferencedImageIds(target: Set<string>, task: TaskRecord, includeStreamPartialImages = true) {
   for (const id of task.inputImageIds || []) target.add(id)
   if (task.maskImageId) target.add(task.maskImageId)
   for (const id of task.outputImages || []) target.add(id)
   for (const id of task.transparentOriginalImages || []) {
     if (id) target.add(id)
   }
-  for (const id of task.streamPartialImageIds || []) target.add(id)
+  if (includeStreamPartialImages) {
+    for (const id of task.streamPartialImageIds || []) target.add(id)
+  }
 }
 
 async function storeTaskOutputImages(task: TaskRecord, images: string[]) {
@@ -1080,7 +1082,8 @@ async function deleteUnreferencedImageIds(imageIds: Iterable<string>) {
 
 async function persistTaskStreamPartialImage(taskId: string, dataUrl: string) {
   try {
-    const imageId = await storeImage(dataUrl, 'generated')
+    // 中间图只在详情弹窗提供原图下载，从不经缩略图展示，且任务完成后即删除，跳过缩略图生成
+    const imageId = await storeImage(dataUrl, 'generated', { skipThumbnail: true })
     cacheImage(imageId, dataUrl)
     const latestTask = useStore.getState().tasks.find((task) => task.id === taskId)
     if (!latestTask || latestTask.status === 'done') {
@@ -1156,26 +1159,37 @@ async function recoverFalTask(taskId: string) {
 export async function cleanupUnreferencedImages(tasks?: TaskRecord[], isCurrent = () => true) {
   const currentTasks = tasks ?? await getAllTasks()
   const referencedIds = new Set<string>()
+  const thumbnailIds = new Set<string>()
   const state = useStore.getState()
-  for (const image of state.inputImages) referencedIds.add(image.id)
-  if (state.galleryInputDraft) {
-    for (const image of state.galleryInputDraft.inputImages) referencedIds.add(image.id)
+  for (const image of state.inputImages) {
+    referencedIds.add(image.id)
+    thumbnailIds.add(image.id)
   }
-  for (const task of currentTasks) addTaskReferencedImageIds(referencedIds, task)
+  if (state.galleryInputDraft) {
+    for (const image of state.galleryInputDraft.inputImages) {
+      referencedIds.add(image.id)
+      thumbnailIds.add(image.id)
+    }
+  }
+  for (const task of currentTasks) {
+    addTaskReferencedImageIds(referencedIds, task)
+    // 仅作为流式中间图引用的图片没有缩略图也不需要补，排除出回填队列
+    addTaskReferencedImageIds(thumbnailIds, task, false)
+  }
 
   // 只枚举 key 清理孤立图片，避免启动时把所有 4K 原图读进内存。
   const imageIds = await getAllImageIds()
-  const referencedImageIds: string[] = []
+  const backfillImageIds: string[] = []
   for (const id of imageIds) {
     if (!isCurrent()) return
     if (referencedIds.has(id)) {
-      referencedImageIds.push(id)
+      if (thumbnailIds.has(id)) backfillImageIds.push(id)
     } else {
       await deleteImage(id)
     }
   }
   if (!isCurrent()) return
-  scheduleThumbnailBackfill(referencedImageIds)
+  scheduleThumbnailBackfill(backfillImageIds)
 }
 
 /** 初始化：从 IndexedDB 加载任务，按需恢复输入图片，并清理孤立图片 */
