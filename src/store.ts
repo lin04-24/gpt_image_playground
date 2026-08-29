@@ -33,6 +33,7 @@ import {
   clearImages,
   storeImage,
   storeImageWithSize,
+  type StoreImageResult,
 } from './lib/db'
 import { callImageApi } from './lib/api'
 import { showBrowserNotification } from './lib/browserNotification'
@@ -972,48 +973,93 @@ function addTaskReferencedImageIds(target: Set<string>, task: TaskRecord) {
 async function storeTaskOutputImages(task: TaskRecord, images: string[]) {
   const outputIds: string[] = []
   const outputDataUrls: string[] = []
-  const outputImageSizes: Array<{ width?: number; height?: number }> = []
-  const transparentOriginalImageIds: string[] = []
+  const outputImageSizes: StoreImageResult[] = []
+  const transparentOriginalImageIds = task.transparentOutput ? ([] as string[]) : undefined
   const storedImageIds: string[] = []
+  let firstError: unknown
 
-  try {
-    for (const dataUrl of images) {
-      let outputDataUrl = dataUrl
-      if (task.transparentOutput) {
-        const original = await storeImageWithSize(dataUrl, 'generated')
-        storedImageIds.push(original.id)
-        cacheImage(original.id, dataUrl)
-
-        try {
-          outputDataUrl = await removeKeyedBackgroundFromDataUrl(dataUrl)
-          transparentOriginalImageIds.push(original.id)
-        } catch (err) {
-          console.warn('透明背景后处理失败，已回退为原始输出', err)
-          outputIds.push(original.id)
-          outputDataUrls.push(dataUrl)
-          outputImageSizes.push(original)
-          transparentOriginalImageIds.push('')
-          continue
-        }
-      }
-
-      const stored = await storeImageWithSize(outputDataUrl, 'generated')
+  // 每张输出图互相独立，并行存储，避免多张 4K 图串行哈希+缩略图把完成流程卡住几秒
+  await Promise.all(images.map(async (dataUrl, index) => {
+    try {
+      const stored = await storeImageWithSize(dataUrl, 'generated')
       storedImageIds.push(stored.id)
-      cacheImage(stored.id, outputDataUrl)
-      outputIds.push(stored.id)
-      outputDataUrls.push(outputDataUrl)
-      outputImageSizes.push(stored)
+      cacheImage(stored.id, dataUrl)
+      outputIds[index] = stored.id
+      outputDataUrls[index] = dataUrl
+      outputImageSizes[index] = stored
+      if (transparentOriginalImageIds) transparentOriginalImageIds[index] = stored.id
+    } catch (err) {
+      firstError ??= err
     }
+  }))
 
-    return {
-      outputIds,
-      outputDataUrls,
-      outputImageSizes,
-      transparentOriginalImageIds: transparentOriginalImageIds.length ? transparentOriginalImageIds : undefined,
-    }
-  } catch (err) {
+  if (firstError != null) {
     await deleteUnreferencedImageIds(storedImageIds)
-    throw err
+    throw firstError
+  }
+
+  return {
+    outputIds,
+    outputDataUrls,
+    outputImageSizes,
+    transparentOriginalImageIds: transparentOriginalImageIds?.length ? transparentOriginalImageIds : undefined,
+  }
+}
+
+interface PendingTransparentOutput {
+  index: number
+  originalId: string
+  originalDataUrl: string
+}
+
+/** 透明背景后处理移出任务完成的关键路径：任务先以原图标记完成，空闲时再逐张透明化并替换输出 */
+function scheduleTransparentOutputProcessing(
+  taskId: string,
+  transparentOriginalImageIds: string[] | undefined,
+  outputDataUrls: string[],
+) {
+  if (!transparentOriginalImageIds?.length) return
+  const pending: PendingTransparentOutput[] = []
+  transparentOriginalImageIds.forEach((originalId, index) => {
+    if (originalId) pending.push({ index, originalId, originalDataUrl: outputDataUrls[index] })
+  })
+  if (!pending.length) return
+
+  const run = () => {
+    void processTransparentOutputImages(taskId, pending)
+  }
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(run, { timeout: 2_000 })
+  } else {
+    setTimeout(run, 250)
+  }
+}
+
+async function processTransparentOutputImages(taskId: string, pending: PendingTransparentOutput[]) {
+  for (const item of pending) {
+    try {
+      const transparentDataUrl = await removeKeyedBackgroundFromDataUrl(item.originalDataUrl)
+      const stored = await storeImageWithSize(transparentDataUrl, 'generated')
+      cacheImage(stored.id, transparentDataUrl)
+
+      // 任务被删除或该位置的输出已被替换时，丢弃本次处理结果
+      const latest = useStore.getState().tasks.find((task) => task.id === taskId)
+      if (!latest || latest.outputImages?.[item.index] !== item.originalId) {
+        await deleteUnreferencedImageIds([stored.id])
+        continue
+      }
+      updateTaskInStore(taskId, {
+        outputImages: latest.outputImages.map((id, index) => index === item.index ? stored.id : id),
+      })
+    } catch (err) {
+      console.warn('透明背景后处理失败，已回退为原始输出', err)
+      const latest = useStore.getState().tasks.find((task) => task.id === taskId)
+      if (!latest || latest.outputImages?.[item.index] !== item.originalId) continue
+      updateTaskInStore(taskId, {
+        transparentOriginalImages: (latest.transparentOriginalImages ?? []).map((id, index) =>
+          index === item.index ? '' : id),
+      })
+    }
   }
 }
 
@@ -1070,6 +1116,7 @@ async function completeRecoveredFalTask(task: TaskRecord, result: Awaited<Return
     ...createTaskDonePatch(task, Date.now()),
     falRecoverable: false,
   })
+  scheduleTransparentOutputProcessing(task.id, transparentOriginalImageIds, outputDataUrls)
   useStore.getState().showToast(`fal.ai 任务已恢复，共 ${outputIds.length} 张图片`, 'success')
   showTaskCompletionNotification('图像生成完成', `fal.ai 任务已恢复，共 ${outputIds.length} 张图片。`)
 }
@@ -1618,6 +1665,7 @@ async function executeTask(taskId: string) {
       falRecoverable: false,
       customRecoverable: false,
     })
+    scheduleTransparentOutputProcessing(taskId, transparentOriginalImageIds, outputDataUrls)
     void deleteUnreferencedImageIds(partialImageIdsToClean)
 
     const failedCount = result.failedRequests?.length ?? 0
@@ -2095,6 +2143,7 @@ async function completeRecoveredCustomTask(task: TaskRecord, result: Awaited<Ret
     ...createTaskDonePatch(task, Date.now()),
     customRecoverable: false,
   })
+  scheduleTransparentOutputProcessing(task.id, transparentOriginalImageIds, outputDataUrls)
   useStore.getState().showToast(`自定义异步任务已恢复，共 ${outputIds.length} 张图片`, 'success')
   showTaskCompletionNotification('图像生成完成', `自定义异步任务已恢复，共 ${outputIds.length} 张图片。`)
 }

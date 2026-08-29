@@ -1,4 +1,6 @@
 import type { TaskRecord, StoredImage, StoredImageThumbnail } from '../types'
+import { canvasToBlob } from './canvasImage'
+import { blobToDataUrl } from './dataUrl'
 
 const DB_NAME = 'gpt-image-playground'
 const DB_VERSION = 4
@@ -300,8 +302,11 @@ async function createImageThumbnail(dataUrl: string): Promise<Omit<StoredImageTh
   if (!ctx) throw new Error('当前浏览器不支持 Canvas')
   ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
 
+  // toBlob 是异步编码，浏览器可把编码移出主线程，避免大图缩略图阻塞任务完成流程
+  const thumbnailBlob = await canvasToBlob(canvas, 'image/webp', THUMBNAIL_QUALITY)
+
   return {
-    thumbnailDataUrl: canvas.toDataURL('image/webp', THUMBNAIL_QUALITY),
+    thumbnailDataUrl: await blobToDataUrl(thumbnailBlob, 'image/webp'),
     width,
     height,
     thumbnailVersion: THUMBNAIL_VERSION,
