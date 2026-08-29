@@ -19,6 +19,7 @@ const settings = {
   allowPromptRewrite: false,
   taskCompletionNotification: false,
   skipTaskDeletionConfirmation: false,
+  respectReducedMotion: true,
   enterSubmit: false,
   zipDownloadRoutes: ['task-selection', 'favorite-collection-selection'],
   profiles: [],

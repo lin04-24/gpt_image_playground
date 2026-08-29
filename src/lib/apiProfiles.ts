@@ -560,6 +560,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     taskCompletionNotification: typeof record.taskCompletionNotification === 'boolean' ? record.taskCompletionNotification : false,
     skipTaskDeletionConfirmation: typeof record.skipTaskDeletionConfirmation === 'boolean' ? record.skipTaskDeletionConfirmation : false,
     enterSubmit: typeof record.enterSubmit === 'boolean' ? record.enterSubmit : false,
+    respectReducedMotion: typeof record.respectReducedMotion === 'boolean' ? record.respectReducedMotion : true,
     zipDownloadRoutes: normalizeZipDownloadRoutes(record.zipDownloadRoutes),
     generationProfileId: typeof record.generationProfileId === 'string' && profiles.some((p) => p.id === record.generationProfileId)
       ? record.generationProfileId
@@ -872,5 +873,6 @@ export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   taskCompletionNotification: false,
   skipTaskDeletionConfirmation: false,
   enterSubmit: false,
+  respectReducedMotion: true,
   zipDownloadRoutes: DEFAULT_ZIP_DOWNLOAD_ROUTES,
 })

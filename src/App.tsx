@@ -5,6 +5,7 @@ import { activateFirstImportedProfile, buildSettingsFromUrlParams, clearUrlSetti
 import { isDefaultConfigOnlyEnabled, mergeImportedSettings } from './lib/apiProfiles'
 import { getCustomProviderConfigUrl, loadCustomProviderSettingsFromUrl } from './lib/customProviderConfigUrl'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
+import { usePrefersReducedMotion } from './hooks/usePrefersReducedMotion'
 import type { AppSettings } from './types'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
@@ -111,11 +112,18 @@ function CloudLoginPage({ message, password = '', onPasswordChange, onSubmit, er
 
 function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
   const setSettings = useStore((s) => s.setSettings)
+  const respectReducedMotion = useStore((s) => s.settings.respectReducedMotion)
+  const prefersReducedMotion = usePrefersReducedMotion()
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const [localReady, setLocalReady] = useState(false)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
+
+  // 无障碍优雅降级：设置开启且系统启用"减少动态效果"时，全局压缩装饰性动画
+  useEffect(() => {
+    document.documentElement.classList.toggle('reduce-motion', respectReducedMotion && prefersReducedMotion)
+  }, [respectReducedMotion, prefersReducedMotion])
 
   useEffect(() => {
     let active = true

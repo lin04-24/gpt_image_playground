@@ -197,6 +197,24 @@ export default function GeneralSettingsTab({
           开启后，点击删除任务会直接删除任务及其未被其他任务引用的图片。
         </div>
       </div>
+      <div className="block">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="block text-sm text-gray-600 dark:text-gray-300">遵循系统减少动态效果</span>
+          <button
+            type="button"
+            onClick={() => commitSettings({ ...draft, respectReducedMotion: !draft.respectReducedMotion })}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.respectReducedMotion ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+            role="switch"
+            aria-checked={draft.respectReducedMotion}
+            aria-label="遵循系统减少动态效果"
+          >
+            <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.respectReducedMotion ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
+          </button>
+        </div>
+        <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
+          开启后，系统启用"减少动态效果"（无障碍）模式时，网格重排、卡片入场等动画会优雅降级为直接呈现；关闭后始终播放动画。
+        </div>
+      </div>
     </div>
   )
 }
