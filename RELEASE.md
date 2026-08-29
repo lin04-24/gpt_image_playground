@@ -1,3 +1,18 @@
+# V2.2.3（2026-08-29）
+
+### 性能
+- 流式中间预览图落库跳过缩略图生成：`persistTaskStreamPartialImage` 对每张 partial 图原先走完整 `storeImage` 流程（SHA-256 哈希、缩略图大图解码 + canvas 绘制 + webp 编码、IndexedDB 双写），`partial_images=3` × 批量 n 张时生成过程中主线程反复做大图编解码，而这些图任务完成后即被删除。现在 `storeImage`/`storeImageWithSize` 新增 `skipThumbnail` 选项，中间图落库只写原图记录、不生成缩略图、不写宽高，生成期间的落库工作量约减半。
+- 缩略图回填队列排除流式中间图：仅作为 `streamPartialImageIds` 引用的图片没有缩略图也不再进入 `scheduleThumbnailBackfill` 队列。此前启动时和每次云同步后 `cleanupUnreferencedImages` 会把所有被引用图片排进回填，跳过的缩略图会在空闲回填里照样生成一遍（后端模式云同步频繁，不排除会抵消上述收益）。
+
+### 功能情况
+- 中间图全链路不经缩略图：生成中预览走内存原图 dataUrl，事后仅详情弹窗「下载中间步骤图」提供原图下载，跳过缩略图不影响任何展示路径；hash 去重、`requestIndex` 语义、任务完成后中间图清理行为均保持不变。
+- 同一图片先作为中间图、后又作为正式输出（hash 相同）时，输出存储仍走既有修补路径补齐缩略图与宽高；云端上传对缺失宽高本就按条件携带 header，中间图无宽高不影响云同步。
+- 未修改数据库结构（DB_VERSION 仍为 4）、公开 API 返回格式或 README，升级不需要额外迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（32 个测试文件，248 项测试）。
+
 # V2.2.2（2026-08-29）
 
 ### 性能
