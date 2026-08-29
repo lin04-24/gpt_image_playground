@@ -90,6 +90,8 @@ function TaskCard({
   const swipeOffsetRef = useRef(0)
   const pendingSwipeOffsetRef = useRef(0)
   const swipeFrameRef = useRef<number | null>(null)
+  const spotlightPointRef = useRef<{ x: number; y: number } | null>(null)
+  const spotlightFrameRef = useRef<number | null>(null)
 
   const updateSwipeDirection = (nextDirection: -1 | 0 | 1) => {
     if (swipeDirectionRef.current === nextDirection) return
@@ -124,6 +126,23 @@ function TaskCard({
     swipeFrameRef.current = window.requestAnimationFrame(() => {
       swipeFrameRef.current = null
       applySwipeOffset(pendingSwipeOffsetRef.current)
+    })
+  }
+
+  // 聚光灯：mousemove 高频触发，rAF 合帧后把光标换算为卡片局部坐标写入 CSS 变量，
+  // 直接操作 DOM 避免 setState 引发整卡重渲染
+  const scheduleSpotlight = (clientX: number, clientY: number) => {
+    spotlightPointRef.current = { x: clientX, y: clientY }
+    if (spotlightFrameRef.current != null) return
+    spotlightFrameRef.current = window.requestAnimationFrame(() => {
+      spotlightFrameRef.current = null
+      const point = spotlightPointRef.current
+      spotlightPointRef.current = null
+      const el = cardRef.current
+      if (!el || !point) return
+      const rect = el.getBoundingClientRect()
+      el.style.setProperty('--mouse-x', `${Math.round(point.x - rect.left)}px`)
+      el.style.setProperty('--mouse-y', `${Math.round(point.y - rect.top)}px`)
     })
   }
 
@@ -226,6 +245,9 @@ function TaskCard({
       window.clearTimeout(swipeResetTimerRef.current)
     }
     cancelSwipeFrame()
+    if (spotlightFrameRef.current != null) {
+      window.cancelAnimationFrame(spotlightFrameRef.current)
+    }
   }, [])
 
   useEffect(() => {
@@ -376,6 +398,7 @@ function TaskCard({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchCancel}
+        onMouseMove={(e) => scheduleSpotlight(e.clientX, e.clientY)}
         draggable={task.status === 'done' && task.outputImages?.length > 0}
         onDragStart={(e) => {
           if (task.status !== 'done' || !task.outputImages?.length) return;
@@ -396,6 +419,9 @@ function TaskCard({
           }
         }}
       >
+        {/* 光标聚光灯：边框环带 + 内表面漫反射微光，位置由 --mouse-x/--mouse-y 驱动 */}
+        <div className="spotlight-glow-layer" aria-hidden="true" />
+        <div className="spotlight-border-layer" aria-hidden="true" />
         {/* 选中时的角标 */}
       {isSelected && (
         <div className="absolute top-2 right-2 z-10 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center shadow-sm">

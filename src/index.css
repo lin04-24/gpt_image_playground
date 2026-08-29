@@ -163,6 +163,67 @@ html.reduce-motion .border-beam-overlay {
   display: none;
 }
 
+/* 光标聚光灯卡片：mousemove 写入 --mouse-x/--mouse-y，双层 radial-gradient 跟随光标
+   边框层用 mask 挖出 1.5px 环带照亮边框，内层在卡片表面形成漫反射微光；
+   聚光位置由光标直接驱动，reduce-motion 下仅透明度过渡被压缩为即时呈现 */
+.spotlight-border-layer,
+.spotlight-glow-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.spotlight-border-layer {
+  z-index: 25;
+  padding: 1.5px;
+  background: radial-gradient(
+    320px circle at var(--mouse-x, -200px) var(--mouse-y, -200px),
+    rgba(59, 130, 246, 0.9),
+    rgba(147, 197, 253, 0.5) 40%,
+    transparent 70%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+
+.spotlight-glow-layer {
+  /* 高于卡片内的 relative 内容（缩略图区），低于选中角标 z-10，保证漫反射覆盖整个表面 */
+  z-index: 5;
+  background: radial-gradient(
+    300px circle at var(--mouse-x, -200px) var(--mouse-y, -200px),
+    rgba(59, 130, 246, 0.1),
+    transparent 70%
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  .spotlight-glow-layer {
+    background: radial-gradient(
+      300px circle at var(--mouse-x, -200px) var(--mouse-y, -200px),
+      rgba(96, 165, 250, 0.16),
+      transparent 70%
+    );
+  }
+}
+
+.task-card:hover .spotlight-border-layer,
+.task-card:hover .spotlight-glow-layer {
+  opacity: 1;
+}
+
+/* 触屏设备没有悬停光标，聚光灯无意义，整层不渲染 */
+@media (hover: none) {
+  .spotlight-border-layer,
+  .spotlight-glow-layer {
+    display: none;
+  }
+}
+
 /* 无障碍降级：设置开启"遵循系统减少动态效果"且系统启用该模式时，压缩全局装饰性动画 */
 html.reduce-motion *,
 html.reduce-motion *::before,
