@@ -41,6 +41,25 @@ export default function DetailModal() {
   const modalRef = useRef<HTMLDivElement>(null)
   const rawUrlsModalRef = useRef<HTMLDivElement>(null)
   const rawResponseModalRef = useRef<HTMLDivElement>(null)
+  const spotlightPointRef = useRef<{ x: number; y: number } | null>(null)
+  const spotlightFrameRef = useRef<number | null>(null)
+
+  // 聚光灯：与 TaskCard 相同，rAF 合帧后把光标换算为面板局部坐标写入 CSS 变量，
+  // 直接操作 DOM 避免 setState 引发整个弹层重渲染
+  const scheduleSpotlight = (clientX: number, clientY: number) => {
+    spotlightPointRef.current = { x: clientX, y: clientY }
+    if (spotlightFrameRef.current != null) return
+    spotlightFrameRef.current = window.requestAnimationFrame(() => {
+      spotlightFrameRef.current = null
+      const point = spotlightPointRef.current
+      spotlightPointRef.current = null
+      const el = modalRef.current
+      if (!el || !point) return
+      const rect = el.getBoundingClientRect()
+      el.style.setProperty('--mouse-x', `${Math.round(point.x - rect.left)}px`)
+      el.style.setProperty('--mouse-y', `${Math.round(point.y - rect.top)}px`)
+    })
+  }
 
   const rawUrlsBackdropPointerDownRef = useRef(false)
   const rawResponseBackdropPointerDownRef = useRef(false)
@@ -86,6 +105,12 @@ export default function DetailModal() {
   useEffect(() => {
     setStreamPreviewLoaded(false)
   }, [activeStreamPreviewSrc, detailTaskId, imageIndex])
+
+  useEffect(() => () => {
+    if (spotlightFrameRef.current != null) {
+      window.cancelAnimationFrame(spotlightFrameRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     const count = task?.status === 'running'
@@ -449,9 +474,13 @@ export default function DetailModal() {
       <div className="absolute inset-0 bg-black/20 dark:bg-black/40 backdrop-blur-md animate-overlay-in" />
       <div
         ref={modalRef}
-        className="relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row z-10 ring-1 ring-black/5 dark:ring-white/10 animate-modal-in"
+        className="detail-modal-panel relative bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border border-white/50 dark:border-white/[0.08] rounded-3xl shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col md:flex-row z-10 ring-1 ring-black/5 dark:ring-white/10 animate-modal-in"
         onClick={(e) => e.stopPropagation()}
+        onMouseMove={(e) => scheduleSpotlight(e.clientX, e.clientY)}
       >
+        {/* 光标聚光灯：边框环带 + 内表面漫反射微光，位置由 --mouse-x/--mouse-y 驱动 */}
+        <div className="spotlight-glow-layer" aria-hidden="true" />
+        <div className="spotlight-border-layer" aria-hidden="true" />
         <div className="flex h-14 items-center justify-end px-4 md:hidden">
           <button
             onClick={() => setDetailTaskId(null)}
