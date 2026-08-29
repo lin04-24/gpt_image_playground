@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const db = vi.hoisted(() => ({
   CURRENT_THUMBNAIL_VERSION: 2,
+  CURRENT_SMALL_THUMBNAIL_VERSION: 1,
   getImage: vi.fn(),
   getImageThumbnail: vi.fn(),
   getStoredFreshImageThumbnail: vi.fn(),
+  getStoredFreshSmallImageThumbnail: vi.fn(),
+  deriveSmallImageThumbnail: vi.fn(),
   putImage: vi.fn(),
   putImageThumbnail: vi.fn(),
 }))
@@ -32,6 +35,14 @@ describe('imageCache', () => {
     db.getImage.mockResolvedValue(undefined)
     db.getImageThumbnail.mockResolvedValue(undefined)
     db.getStoredFreshImageThumbnail.mockResolvedValue(undefined)
+    db.getStoredFreshSmallImageThumbnail.mockResolvedValue(undefined)
+    db.deriveSmallImageThumbnail.mockImplementation(async (large: { id: string; thumbnailDataUrl: string; width?: number; height?: number }) => ({
+      id: large.id,
+      thumbnailDataUrl: large.thumbnailDataUrl,
+      width: large.width,
+      height: large.height,
+      thumbnailVersion: db.CURRENT_SMALL_THUMBNAIL_VERSION,
+    }))
     db.putImage.mockResolvedValue('image')
     db.putImageThumbnail.mockResolvedValue('thumbnail')
     setRemoteImageLoader(undefined)
@@ -52,13 +63,13 @@ describe('imageCache', () => {
     for (let i = 0; i < 80; i++) {
       cacheThumbnail(`thumbnail-${i}`, {
         dataUrl: `thumbnail-data-${i}`,
-        thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+        thumbnailVersion: db.CURRENT_SMALL_THUMBNAIL_VERSION,
       })
     }
     await expect(ensureImageThumbnailCached('thumbnail-0')).resolves.toMatchObject({ dataUrl: 'thumbnail-data-0' })
     cacheThumbnail('thumbnail-80', {
       dataUrl: 'thumbnail-data-80',
-      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+      thumbnailVersion: db.CURRENT_SMALL_THUMBNAIL_VERSION,
     })
     db.getStoredFreshImageThumbnail.mockResolvedValue({
       thumbnailDataUrl: 'stored-thumbnail',
@@ -72,7 +83,7 @@ describe('imageCache', () => {
   it('only caches thumbnails from the current version', async () => {
     cacheThumbnail('image', {
       dataUrl: 'stale-thumbnail',
-      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION - 1,
+      thumbnailVersion: db.CURRENT_SMALL_THUMBNAIL_VERSION - 1,
     })
     db.getStoredFreshImageThumbnail.mockResolvedValue({
       thumbnailDataUrl: 'fresh-thumbnail',
@@ -85,7 +96,7 @@ describe('imageCache', () => {
       dataUrl: 'fresh-thumbnail',
       width: 640,
       height: 480,
-      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+      thumbnailVersion: db.CURRENT_SMALL_THUMBNAIL_VERSION,
     })
     expect(db.getStoredFreshImageThumbnail).toHaveBeenCalledOnce()
 
@@ -98,7 +109,7 @@ describe('imageCache', () => {
     cacheImage('deleted', 'deleted-data')
     cacheThumbnail('deleted', {
       dataUrl: 'deleted-thumbnail',
-      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+      thumbnailVersion: db.CURRENT_SMALL_THUMBNAIL_VERSION,
     })
     deleteImageCacheEntry('deleted')
     db.getStoredFreshImageThumbnail.mockResolvedValueOnce({
@@ -115,7 +126,7 @@ describe('imageCache', () => {
     cacheImage('cleared', 'cleared-data')
     cacheThumbnail('cleared', {
       dataUrl: 'cleared-thumbnail',
-      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+      thumbnailVersion: db.CURRENT_SMALL_THUMBNAIL_VERSION,
     })
     clearImageCaches()
     db.getStoredFreshImageThumbnail.mockClear()
@@ -190,6 +201,7 @@ describe('imageCache', () => {
     vi.useFakeTimers()
     db.getImage.mockResolvedValue({ width: 1000, height: 1000 })
     db.getImageThumbnail.mockImplementation(async (id: string) => ({
+      id,
       thumbnailDataUrl: `${id}-thumbnail`,
       width: 1000,
       height: 1000,
@@ -205,11 +217,12 @@ describe('imageCache', () => {
 
     expect(db.getImage.mock.calls.map(([id]) => id)).toEqual(['visible', 'background'])
     expect(db.getImageThumbnail.mock.calls.map(([id]) => id)).toEqual(['visible', 'background'])
-    expect(onThumbnail).toHaveBeenCalledWith({
+    // 小档派生在大档生成之后异步完成，等待订阅方收到通知
+    await vi.waitFor(() => expect(onThumbnail).toHaveBeenCalledWith({
       dataUrl: 'visible-thumbnail',
       width: 1000,
       height: 1000,
-    })
+    }))
     unsubscribe()
   })
 
@@ -248,6 +261,7 @@ describe('imageCache', () => {
     db.getImageThumbnail
       .mockRejectedValueOnce(new Error('thumbnail failed'))
       .mockResolvedValueOnce({
+        id: 'image',
         thumbnailDataUrl: 'retried-thumbnail',
         thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
       })

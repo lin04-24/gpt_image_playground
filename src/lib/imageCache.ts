@@ -1,9 +1,11 @@
 import type { StoredImage, StoredImageThumbnail } from '../types'
 import {
-  CURRENT_THUMBNAIL_VERSION,
+  CURRENT_SMALL_THUMBNAIL_VERSION,
+  deriveSmallImageThumbnail,
   getImage,
   getImageThumbnail,
   getStoredFreshImageThumbnail,
+  getStoredFreshSmallImageThumbnail,
   putImage,
   putImageThumbnail,
 } from './db'
@@ -66,7 +68,7 @@ export function deleteCachedImage(id: string) {
 
 function getCachedThumbnail(id: string) {
   const thumbnail = thumbnailCache.get(id)
-  if (thumbnail?.thumbnailVersion === CURRENT_THUMBNAIL_VERSION) {
+  if (thumbnail?.thumbnailVersion === CURRENT_SMALL_THUMBNAIL_VERSION) {
     thumbnailCache.delete(id)
     thumbnailCache.set(id, thumbnail)
     return thumbnail
@@ -76,7 +78,7 @@ function getCachedThumbnail(id: string) {
 }
 
 export function cacheThumbnail(id: string, thumbnail: ImageThumbnail) {
-  if (thumbnail.thumbnailVersion !== CURRENT_THUMBNAIL_VERSION) return
+  if (thumbnail.thumbnailVersion !== CURRENT_SMALL_THUMBNAIL_VERSION) return
   thumbnailCache.delete(id)
   thumbnailCache.set(id, thumbnail)
   while (thumbnailCache.size > MAX_THUMBNAIL_CACHE_ENTRIES) {
@@ -86,13 +88,15 @@ export function cacheThumbnail(id: string, thumbnail: ImageThumbnail) {
   }
 }
 
+const toImageThumbnail = (rec: StoredImageThumbnail): ImageThumbnail => ({
+  dataUrl: rec.thumbnailDataUrl,
+  width: rec.width,
+  height: rec.height,
+  thumbnailVersion: rec.thumbnailVersion,
+})
+
 export function publishImageThumbnail(thumbnail: StoredImageThumbnail) {
-  const value = {
-    dataUrl: thumbnail.thumbnailDataUrl,
-    width: thumbnail.width,
-    height: thumbnail.height,
-    thumbnailVersion: thumbnail.thumbnailVersion,
-  }
+  const value = toImageThumbnail(thumbnail)
   cacheThumbnail(thumbnail.id, value)
   thumbnailSubscribers.get(thumbnail.id)?.forEach((callback) => callback({
     dataUrl: value.dataUrl,
@@ -101,9 +105,12 @@ export function publishImageThumbnail(thumbnail: StoredImageThumbnail) {
   }))
 }
 
-export async function storeAndPublishImageThumbnail(thumbnail: StoredImageThumbnail) {
-  await putImageThumbnail(thumbnail)
-  publishImageThumbnail(thumbnail)
+/** 云端/后端下发的大档缩略图落库，派生网格小档后通知订阅方；返回派生的小档记录 */
+export async function storeAndPublishImageThumbnail(large: StoredImageThumbnail): Promise<StoredImageThumbnail | undefined> {
+  await putImageThumbnail(large)
+  const small = await deriveSmallImageThumbnail(large)
+  if (small) publishImageThumbnail(small)
+  return small
 }
 
 export function deleteImageCacheEntry(id: string) {
@@ -162,36 +169,48 @@ export async function ensureImageThumbnailCached(id: string): Promise<ImageThumb
   const cached = getCachedThumbnail(id)
   if (cached) return cached
 
-  const rec = await getStoredFreshImageThumbnail(id)
-  if (!rec?.thumbnailDataUrl) {
-    if (remoteImageThumbnailLoader) {
-      try {
-        const remote = await remoteImageThumbnailLoader(id)
-        if (remote) {
-          await storeAndPublishImageThumbnail(remote)
-          return {
-            dataUrl: remote.thumbnailDataUrl,
-            width: remote.width,
-            height: remote.height,
-            thumbnailVersion: remote.thumbnailVersion,
-          }
-        }
-      } catch {
-        // 服务端缩略图尚未完成时保留占位图，等待事件后重试。
-      }
-    }
-    scheduleThumbnailBackfill([id], 'visible')
-    return undefined
+  const storedSmall = await getStoredFreshSmallImageThumbnail(id)
+  if (storedSmall?.thumbnailDataUrl) {
+    const thumbnail = toImageThumbnail(storedSmall)
+    cacheThumbnail(id, thumbnail)
+    return thumbnail
   }
 
-  const thumbnail = {
-    dataUrl: rec.thumbnailDataUrl,
-    width: rec.width,
-    height: rec.height,
-    thumbnailVersion: rec.thumbnailVersion,
+  // 存量数据只有 720 大档：现场派生 320 小档完成回填，避免为此重新解码原图
+  const storedLarge = await getStoredFreshImageThumbnail(id)
+  if (storedLarge?.thumbnailDataUrl) {
+    const derived = await deriveSmallImageThumbnail(storedLarge)
+    if (derived?.thumbnailDataUrl) {
+      const thumbnail = toImageThumbnail(derived)
+      cacheThumbnail(id, thumbnail)
+      return thumbnail
+    }
   }
-  cacheThumbnail(id, thumbnail)
-  return thumbnail
+
+  if (remoteImageThumbnailLoader) {
+    try {
+      const remote = await remoteImageThumbnailLoader(id)
+      if (remote) {
+        const small = await storeAndPublishImageThumbnail(remote)
+        if (small?.thumbnailDataUrl) {
+          const thumbnail = toImageThumbnail(small)
+          cacheThumbnail(id, thumbnail)
+          return thumbnail
+        }
+      }
+    } catch {
+      // 服务端缩略图尚未完成时保留占位图，等待事件后重试。
+    }
+  }
+  scheduleThumbnailBackfill([id], 'visible')
+  return undefined
+}
+
+/** 详情弹窗占位图：优先 720 大档，缺失时退回网格小档 */
+export async function ensureLargeImageThumbnailCached(id: string): Promise<ImageThumbnail | undefined> {
+  const large = await getStoredFreshImageThumbnail(id)
+  if (large?.thumbnailDataUrl) return toImageThumbnail(large)
+  return ensureImageThumbnailCached(id)
 }
 
 export function subscribeImageThumbnail(id: string, callback: (thumbnail: ImageThumbnail) => void) {
@@ -284,15 +303,11 @@ async function startThumbnailBackfill(id: string) {
     if (getCachedThumbnail(id)) return
 
     const thumbnail = await getImageThumbnail(id)
-    if (thumbnail?.thumbnailDataUrl) {
-      publishImageThumbnail({
-        id,
-        thumbnailDataUrl: thumbnail.thumbnailDataUrl,
-        width: thumbnail.width,
-        height: thumbnail.height,
-        thumbnailVersion: thumbnail.thumbnailVersion,
-      })
-    }
+    if (!thumbnail?.thumbnailDataUrl) return
+
+    // getImageThumbnail 已同步写入小档；旧格式大档（内联缩略图）则现场派生
+    const small = await deriveSmallImageThumbnail(thumbnail)
+    if (small?.thumbnailDataUrl) publishImageThumbnail(small)
   } catch {
     // 缩略图生成失败时保留占位图，后续仍可再次补全。
   } finally {
