@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { clearFailedTasks, clearRunningTasks, useStore, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
 import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds } from '../lib/favoriteState'
 import { useTooltip } from '../hooks/useTooltip'
@@ -80,6 +80,28 @@ export default function SearchBar() {
     }).length
   })
   const setConfirmDialog = useStore((s) => s.setConfirmDialog)
+  // 输入用本地 state，150ms 防抖后才写入 store，避免每次按键触发全表筛选
+  const [inputValue, setInputValue] = useState(searchQuery)
+  const commitTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const lastCommittedRef = useRef(searchQuery)
+
+  useEffect(() => {
+    if (searchQuery === lastCommittedRef.current) return
+    // store 中的搜索词被外部改动（如后端同步恢复筛选）时同步输入框
+    lastCommittedRef.current = searchQuery
+    setInputValue(searchQuery)
+  }, [searchQuery])
+
+  useEffect(() => () => clearTimeout(commitTimerRef.current), [])
+
+  const handleInputChange = (value: string) => {
+    setInputValue(value)
+    clearTimeout(commitTimerRef.current)
+    commitTimerRef.current = setTimeout(() => {
+      lastCommittedRef.current = value
+      setSearchQuery(value)
+    }, 150)
+  }
   const inCollectionOverview = filterFavorite && !activeFavoriteCollectionId
   const isFailedFilter = filterStatus === 'error'
   const isRunningFilter = filterStatus === 'running'
@@ -241,8 +263,8 @@ export default function SearchBar() {
         </svg>
         <input
           ref={inputRef}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={inputValue}
+          onChange={(e) => handleInputChange(e.target.value)}
           type="text"
           placeholder={inCollectionOverview ? '搜索收藏夹名称...' : '搜索提示词、参数...'}
           className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400 transition"
