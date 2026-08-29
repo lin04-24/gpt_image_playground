@@ -125,12 +125,13 @@ export async function synchronizeBackendData(page = pageState.page) {
     const prevById = new Map(prevTasks.map((task) => [task.id, task]))
     const serverTasks = result.tasks.map((task) => {
       const prev = prevById.get(task.id)
-      return prev && JSON.stringify(prev) === JSON.stringify(task) ? prev : task
+      if (prev && JSON.stringify(prev) === JSON.stringify(task)) return prev
+      return prev?.beamPhase == null ? task : { ...task, beamPhase: prev.beamPhase }
     })
     // 建单请求返回前，保留本地占位卡片，避免 SSE 触发的同步造成卡片闪退
     const tasks = mergePendingTasks(prevTasks, serverTasks)
     useStore.setState({ tasks, selectedTaskIds: [] })
-    await Promise.all(result.tasks.map((task) => putTask(task)))
+    await Promise.all(serverTasks.map((task) => putTask(task)))
     if (requestController !== controller) return
     clearSyncRetry()
     setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '', initialized: true })

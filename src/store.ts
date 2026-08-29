@@ -16,6 +16,7 @@ import type {
 import { DEFAULT_PARAMS } from './types'
 import { DEFAULT_SETTINGS, getActiveApiProfile, getCustomProviderDefinition, getGenerationApiProfile, mergeImportedSettings, normalizeSettings, validateApiProfile } from './lib/apiProfiles'
 import { dismissAllTooltips } from './lib/tooltipDismiss'
+import { getBeamPhaseSeed } from './lib/beamAnimation'
 import { remapImageMentionsForOrder, replaceImageMentionsForApi } from './lib/promptImageMentions'
 import {
   getAllTasks,
@@ -1379,6 +1380,7 @@ async function submitTaskViaBackend(options: {
     createdAt: Date.now(),
     finishedAt: null,
     elapsed: null,
+    beamPhase: getBeamPhaseSeed(placeholderId),
   }
   useStore.getState().setTasks([placeholder, ...useStore.getState().tasks].slice(0, BACKEND_PAGE_SIZE))
 
@@ -1412,11 +1414,12 @@ async function submitTaskViaBackend(options: {
       transparentOutput: options.transparentOutput,
       transparentPrompt: options.transparentPrompt,
     })
-    await putTask(task)
+    const taskWithBeamPhase = { ...task, beamPhase: placeholder.beamPhase }
+    await putTask(taskWithBeamPhase)
     const currentTasks = useStore.getState().tasks
     const placeholderIndex = currentTasks.findIndex((item) => item.id === placeholderId)
-    const nextTasks = currentTasks.filter((item) => item.id !== task.id && item.id !== placeholderId)
-    nextTasks.splice(placeholderIndex < 0 ? 0 : Math.min(placeholderIndex, nextTasks.length), 0, task)
+    const nextTasks = currentTasks.filter((item) => item.id !== taskWithBeamPhase.id && item.id !== placeholderId)
+    nextTasks.splice(placeholderIndex < 0 ? 0 : Math.min(placeholderIndex, nextTasks.length), 0, taskWithBeamPhase)
     useStore.getState().setTasks(nextTasks.slice(0, BACKEND_PAGE_SIZE))
     useStore.getState().showToast('任务已提交', 'success')
   } catch (error) {
