@@ -1412,9 +1412,8 @@ async function submitTaskViaBackend(options: {
       transparentOutput: options.transparentOutput,
       transparentPrompt: options.transparentPrompt,
     })
-    const currentTasks = useStore.getState().tasks
-    useStore.getState().setTasks([task, ...currentTasks.filter((item) => item.id !== task.id && item.id !== placeholderId)].slice(0, BACKEND_PAGE_SIZE))
     await putTask(task)
+    useStore.getState().setTasks([task, ...useStore.getState().tasks.filter((item) => item.id !== task.id && item.id !== placeholderId)].slice(0, BACKEND_PAGE_SIZE))
     useStore.getState().showToast('任务已提交', 'success')
   } catch (error) {
     // 提交失败时移除占位卡片，错误交由调用方提示
@@ -1587,9 +1586,8 @@ export async function submitTask(options: { allowFullMask?: boolean; useCurrentA
       elapsed: null,
     }
 
-    const latestTasks = useStore.getState().tasks
-    useStore.getState().setTasks([task, ...latestTasks])
     await putTask(task)
+    useStore.getState().setTasks([task, ...useStore.getState().tasks])
 
     // 异步调用 API
     executeTask(taskId)
@@ -1938,8 +1936,8 @@ export async function retryTask(task: TaskRecord) {
   if (import.meta.env.VITE_BACKEND_API === 'true') {
     try {
       const retried = await retryBackendTask(task.id)
-      useStore.getState().setTasks([retried, ...useStore.getState().tasks].slice(0, BACKEND_PAGE_SIZE))
       await putTask(retried)
+      useStore.getState().setTasks([retried, ...useStore.getState().tasks].slice(0, BACKEND_PAGE_SIZE))
       useStore.getState().showToast('任务已重新排队', 'success')
     } catch (error) {
       useStore.getState().showToast(error instanceof Error ? error.message : '重试失败', 'error')
@@ -1981,9 +1979,8 @@ export async function retryTask(task: TaskRecord) {
     elapsed: null,
   }
 
-  const latestTasks = useStore.getState().tasks
-  useStore.getState().setTasks([newTask, ...latestTasks])
   await putTask(newTask)
+  useStore.getState().setTasks([newTask, ...useStore.getState().tasks])
 
   executeTask(taskId)
 }

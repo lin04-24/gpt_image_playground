@@ -1,4 +1,4 @@
-import type { AppSettings, InputDraft } from '../types'
+import type { AppSettings, InputDraft, TaskRecord } from '../types'
 import { blobToDataUrl } from './dataUrl'
 import { CURRENT_THUMBNAIL_VERSION, getAllImageIds, getAllTasks, getImage, getImageDataUrl, putTask } from './db'
 import { clearImageCaches, deleteImageCacheEntry, ensureImageCached, ensureImageThumbnailCached, setRemoteImageLoader, setRemoteImageThumbnailLoader } from './imageCache'
@@ -69,6 +69,12 @@ export function getBackendPageState() {
   return pageState
 }
 
+function mergePendingTasks(tasks: TaskRecord[], serverTasks: TaskRecord[]) {
+  const serverTaskIds = new Set(serverTasks.map((task) => task.id))
+  const pendingTasks = tasks.filter((task) => task.id.startsWith('pending-') && !serverTaskIds.has(task.id))
+  return [...pendingTasks, ...serverTasks].slice(0, BACKEND_PAGE_SIZE)
+}
+
 function currentFilter() {
   const state = useStore.getState()
   return {
@@ -117,10 +123,12 @@ export async function synchronizeBackendData(page = pageState.page) {
     // 内容未变化的任务保留原对象引用，避免每次 SSE 事件都让整列表重渲染造成闪烁
     const prevTasks = useStore.getState().tasks
     const prevById = new Map(prevTasks.map((task) => [task.id, task]))
-    const tasks = result.tasks.map((task) => {
+    const serverTasks = result.tasks.map((task) => {
       const prev = prevById.get(task.id)
       return prev && JSON.stringify(prev) === JSON.stringify(task) ? prev : task
     })
+    // 建单请求返回前，保留本地占位卡片，避免 SSE 触发的同步造成卡片闪退
+    const tasks = mergePendingTasks(prevTasks, serverTasks)
     useStore.setState({ tasks, selectedTaskIds: [] })
     await Promise.all(result.tasks.map((task) => putTask(task)))
     if (requestController !== controller) return
