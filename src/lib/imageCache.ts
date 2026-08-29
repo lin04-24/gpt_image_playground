@@ -6,6 +6,7 @@ import {
   getImageThumbnail,
   getStoredFreshImageThumbnail,
   getStoredFreshSmallImageThumbnail,
+  getStoredImageThumbnail,
   putImage,
   putImageThumbnail,
 } from './db'
@@ -264,7 +265,10 @@ async function getNextThumbnailBackfillBatch() {
   const candidates = getOrderedThumbnailBackfillIds().slice(0, MAX_THUMBNAIL_BACKFILL_CONCURRENT)
   if (candidates.length === 0) return []
 
+  // 720 大档记录携带原图宽高，读它即可决定并发度，避免把多 MB 的原图 dataUrl 载入内存
   const sizes = await Promise.all(candidates.map(async (id) => {
+    const thumbnail = await getStoredImageThumbnail(id)
+    if (thumbnail?.width && thumbnail?.height) return { width: thumbnail.width, height: thumbnail.height }
     const image = await getImage(id)
     return { width: image?.width, height: image?.height }
   }))
