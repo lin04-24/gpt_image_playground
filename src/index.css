@@ -159,6 +159,22 @@ body.drag-selecting * {
   }
 }
 
+/* 头部阴影渐变（Scroll Shadow）：贴顶时无影融入内容，滚动偏离顶部后渐显底部投影示意悬浮层级；
+   过渡仅作用于 box-shadow，reduce-motion 生效时由全局降级规则压缩为即时呈现 */
+.header-scroll-shadow {
+  transition: box-shadow 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header-scroll-shadow.is-scrolled {
+  box-shadow: 0 8px 24px -12px rgba(15, 23, 42, 0.3);
+}
+
+@media (prefers-color-scheme: dark) {
+  .header-scroll-shadow.is-scrolled {
+    box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.65);
+  }
+}
+
 /* 无障碍联动：reduce-motion 生效时隐藏光柱，避免动画冻结后残留一段静止渐变 */
 html.reduce-motion .border-beam-overlay {
   display: none;
