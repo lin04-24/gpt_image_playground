@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useStore, reuseConfig, editOutputs, removeTask, taskMatchesFilterStatus, taskMatchesSearchQuery } from '../store'
+import type { TaskRecord } from '../types'
 import { ALL_FAVORITES_COLLECTION_ID, getTaskFavoriteCollectionIds } from '../lib/favoriteState'
 import { getBackendPageState, setBackendPage, subscribeBackendPage } from '../lib/backendSync'
 import { ChevronLeftIcon, ChevronRightIcon } from './icons'
 import TaskCard from './TaskCard'
+
+const IS_MAC = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
 export default function TaskGrid() {
   const tasks = useStore((s) => s.tasks)
@@ -12,9 +15,6 @@ export default function TaskGrid() {
   const filterFavorite = useStore((s) => s.filterFavorite)
   const activeFavoriteCollectionId = useStore((s) => s.activeFavoriteCollectionId)
   const defaultFavoriteCollectionId = useStore((s) => s.defaultFavoriteCollectionId)
-  const setDetailTaskId = useStore((s) => s.setDetailTaskId)
-  const setConfirmDialog = useStore((s) => s.setConfirmDialog)
-  const skipTaskDeletionConfirmation = useStore((s) => s.settings.skipTaskDeletionConfirmation)
   const selectedTaskIds = useStore((s) => s.selectedTaskIds)
   const setSelectedTaskIds = useStore((s) => s.setSelectedTaskIds)
   const clearSelection = useStore((s) => s.clearSelection)
@@ -27,12 +27,13 @@ export default function TaskGrid() {
   const isDragging = useRef(false)
   const dragScrollIntervalRef = useRef<number | null>(null)
   const dragScrollDirectionRef = useRef<-1 | 1 | null>(null)
+  const selectionFrameRef = useRef<number | null>(null)
+  const pendingSelectionPointRef = useRef<{ pageX: number; pageY: number } | null>(null)
   const lastToastTimeRef = useRef(0)
   const suppressClickUntil = useRef(0)
   const startedOnCard = useRef(false)
   const startedWithCtrl = useRef(false)
   const initialSelection = useRef<string[]>([])
-  const isMac = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
   const backendEnabled = import.meta.env.VITE_BACKEND_API === 'true'
   const backendPage = useSyncExternalStore(subscribeBackendPage, getBackendPageState, getBackendPageState)
 
@@ -51,17 +52,34 @@ export default function TaskGrid() {
     })
   }, [backendEnabled, backendPage.initialized, backendPage.pageSize, tasks, searchQuery, filterStatus, filterFavorite, activeFavoriteCollectionId, defaultFavoriteCollectionId])
 
-  const handleDelete = (task: typeof tasks[0]) => {
-    if (skipTaskDeletionConfirmation) {
+  const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
+
+  // 稳定回调：TaskCard 已 memo，这里必须保证引用不变才能跳过无关卡片重渲染
+  const handleCardClick = useCallback((task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => {
+    if (Date.now() < suppressClickUntil.current) {
+      e.preventDefault()
+      return
+    }
+    suppressClickUntil.current = 0
+    const isCtrl = IS_MAC ? e.metaKey : e.ctrlKey
+    if (isCtrl) {
+      useStore.getState().toggleTaskSelection(task.id)
+      return
+    }
+    useStore.getState().setDetailTaskId(task.id)
+  }, [])
+
+  const handleDelete = useCallback((task: TaskRecord) => {
+    if (useStore.getState().settings.skipTaskDeletionConfirmation) {
       void removeTask(task)
       return
     }
-    setConfirmDialog({
+    useStore.getState().setConfirmDialog({
       title: '删除任务',
       message: '确定要删除这个任务吗？关联的图片资源也会被清理（如果没有其他任务引用）。',
       action: () => removeTask(task),
     })
-  }
+  }, [])
 
   const getPagePoint = (clientX: number, clientY: number) => ({
     pageX: clientX + window.scrollX,
@@ -126,10 +144,53 @@ export default function TaskGrid() {
       }
     })
 
+    // 框未扫过新卡片时跳过 store 写入，避免 mousemove 期间持续触发全列表渲染
+    const current = useStore.getState().selectedTaskIds
+    if (current.length === newSelected.size && current.every((id) => newSelected.has(id))) return
     setSelectedTaskIds(Array.from(newSelected))
   }
 
   useEffect(() => {
+    // 框选计算（querySelectorAll + getBoundingClientRect + setState）按 rAF 合帧执行，
+    // mousemove/scroll 高频事件里只记录最新坐标
+    const applySelectionUpdate = () => {
+      selectionFrameRef.current = null
+      const point = pendingSelectionPointRef.current
+      pendingSelectionPointRef.current = null
+      const start = dragStart.current
+      if (!point || !start) return
+      setSelectionBox({
+        startPageX: start.pageX,
+        startPageY: start.pageY,
+        currentPageX: point.pageX,
+        currentPageY: point.pageY,
+      })
+      updateSelectionFromPoint(point.pageX, point.pageY)
+    }
+
+    const scheduleSelectionUpdate = (pageX: number, pageY: number) => {
+      pendingSelectionPointRef.current = { pageX, pageY }
+      if (selectionFrameRef.current != null) return
+      selectionFrameRef.current = window.requestAnimationFrame(applySelectionUpdate)
+    }
+
+    // 结束框选时把挂起的最后一帧同步执行，避免快速拖放丢失末次命中
+    const flushSelectionUpdate = () => {
+      if (selectionFrameRef.current != null) {
+        window.cancelAnimationFrame(selectionFrameRef.current)
+        selectionFrameRef.current = null
+      }
+      applySelectionUpdate()
+    }
+
+    const cancelPendingSelectionUpdate = () => {
+      if (selectionFrameRef.current != null) {
+        window.cancelAnimationFrame(selectionFrameRef.current)
+        selectionFrameRef.current = null
+      }
+      pendingSelectionPointRef.current = null
+    }
+
     const stopDragScroll = () => {
       if (dragScrollIntervalRef.current) {
         clearInterval(dragScrollIntervalRef.current)
@@ -159,6 +220,7 @@ export default function TaskGrid() {
         suppressClickUntil.current = Date.now() + 250
       }
       stopDragScroll()
+      flushSelectionUpdate()
       isDragging.current = false
       dragStart.current = null
       lastClientPoint.current = null
@@ -179,7 +241,7 @@ export default function TaskGrid() {
       if (target.closest('[data-no-drag-select], [data-lightbox-root]')) return
       if (target.closest('button, a, input, textarea, select')) return
 
-      const isCtrl = isMac ? e.metaKey : e.ctrlKey
+      const isCtrl = IS_MAC ? e.metaKey : e.ctrlKey
       beginSelection(target as HTMLElement, e.clientX, e.clientY, isCtrl)
       e.preventDefault()
     }
@@ -194,13 +256,7 @@ export default function TaskGrid() {
       if (distance < 6 && !hasDragged.current) return
 
       hasDragged.current = true
-      setSelectionBox({
-        startPageX: start.pageX,
-        startPageY: start.pageY,
-        currentPageX: point.pageX,
-        currentPageY: point.pageY,
-      })
-      updateSelectionFromPoint(point.pageX, point.pageY)
+      scheduleSelectionUpdate(point.pageX, point.pageY)
       e.preventDefault()
 
       const scrollThreshold = 40
@@ -217,14 +273,7 @@ export default function TaskGrid() {
       if (!isDragging.current || !dragStart.current || !lastClientPoint.current || !hasDragged.current) return
 
       const point = getPagePoint(lastClientPoint.current.x, lastClientPoint.current.y)
-      const start = dragStart.current
-      setSelectionBox({
-        startPageX: start.pageX,
-        startPageY: start.pageY,
-        currentPageX: point.pageX,
-        currentPageY: point.pageY,
-      })
-      updateSelectionFromPoint(point.pageX, point.pageY)
+      scheduleSelectionUpdate(point.pageX, point.pageY)
     }
 
     const handleDocumentWheel = (e: WheelEvent) => {
@@ -240,7 +289,7 @@ export default function TaskGrid() {
       const now = Date.now()
       if (now - lastToastTimeRef.current > 3000) {
         lastToastTimeRef.current = now
-        const keyName = isMac ? '⌘' : 'Ctrl'
+        const keyName = IS_MAC ? '⌘' : 'Ctrl'
         useStore.getState().showToast(`松开 ${keyName} 键使用滚轮，或拖至边缘自动滚动`, 'info')
       }
     }
@@ -262,7 +311,7 @@ export default function TaskGrid() {
       document.removeEventListener('wheel', handleDocumentWheel, true)
       window.removeEventListener('scroll', handleDocumentScroll, true)
     }
-  }, [clearSelection, isMac])
+  }, [clearSelection])
 
   if (!filteredTasks.length) {
     return (
@@ -302,24 +351,11 @@ export default function TaskGrid() {
           <div key={task.id} className="task-card-wrapper" data-task-id={task.id}>
             <TaskCard
               task={task}
-              onClick={(e) => {
-                if (Date.now() < suppressClickUntil.current) {
-                  e.preventDefault()
-                  return
-                }
-                suppressClickUntil.current = 0
-                const isCtrl = isMac ? e.metaKey : e.ctrlKey
-                if (isCtrl) {
-                  useStore.getState().toggleTaskSelection(task.id)
-                  return
-                }
-
-                setDetailTaskId(task.id)
-              }}
-              onReuse={() => reuseConfig(task)}
-              onEditOutputs={() => editOutputs(task)}
-              onDelete={() => handleDelete(task)}
-              isSelected={selectedTaskIds.includes(task.id)}
+              onClick={handleCardClick}
+              onReuse={reuseConfig}
+              onEditOutputs={editOutputs}
+              onDelete={handleDelete}
+              isSelected={selectedIdSet.has(task.id)}
             />
           </div>
         ))}

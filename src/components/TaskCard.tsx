@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type ReactNode } from 'react'
+import { memo, useEffect, useState, useRef, type ReactNode } from 'react'
 import type { TaskRecord } from '../types'
 import { useStore, retryTask } from '../store'
 import { ensureImageThumbnailCached, subscribeImageThumbnail } from '../lib/imageCache'
@@ -8,12 +8,13 @@ import { DEFAULT_IMAGES_MODEL, DEFAULT_FAL_MODEL } from '../lib/apiProfiles'
 import { CodeIcon, TransparentBgIcon } from './icons'
 import ViewportTooltip from './ViewportTooltip'
 
+// 回调统一携带 task，由父组件提供稳定引用，配合 memo 跳过无关卡片重渲染
 interface Props {
   task: TaskRecord
-  onReuse: () => void
-  onEditOutputs: () => void
-  onDelete: () => void
-  onClick: (e: React.MouseEvent | React.TouchEvent) => void
+  onReuse: (task: TaskRecord) => void
+  onEditOutputs: (task: TaskRecord) => void
+  onDelete: (task: TaskRecord) => void
+  onClick: (task: TaskRecord, e: React.MouseEvent | React.TouchEvent) => void
   isSelected?: boolean
   disableSwipe?: boolean
 }
@@ -57,7 +58,7 @@ function TaskActionButton({
   )
 }
 
-export default function TaskCard({
+function TaskCard({
   task,
   onReuse,
   onEditOutputs,
@@ -365,7 +366,7 @@ export default function TaskCard({
             e.stopPropagation()
             return
           }
-          onClick(e)
+          onClick(task, e)
         }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -667,7 +668,7 @@ export default function TaskCard({
               </TaskActionButton>
               <TaskActionButton
                 tooltip="复用配置"
-                onClick={onReuse}
+                onClick={() => onReuse(task)}
                 className="p-1.5 rounded-md hover:bg-blue-50 dark:hover:bg-blue-950/30 text-gray-400 hover:text-blue-500 transition"
               >
                 <svg
@@ -686,7 +687,7 @@ export default function TaskCard({
               </TaskActionButton>
               <TaskActionButton
                 tooltip="编辑输出"
-                onClick={onEditOutputs}
+                onClick={() => onEditOutputs(task)}
                 className="p-1.5 rounded-md hover:bg-green-50 dark:hover:bg-green-950/30 text-gray-400 hover:text-green-500 transition disabled:opacity-30"
                 disabled={!task.outputImages?.length}
               >
@@ -706,7 +707,7 @@ export default function TaskCard({
               </TaskActionButton>
               {task.status !== 'running' && (task.status as string) !== 'queued' && <TaskActionButton
                 tooltip="删除任务"
-                onClick={onDelete}
+                onClick={() => onDelete(task)}
                 className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950/30 text-gray-400 hover:text-red-500 transition"
               >
                 <svg
@@ -731,3 +732,5 @@ export default function TaskCard({
     </div>
   )
 }
+
+export default memo(TaskCard)
