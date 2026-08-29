@@ -67,6 +67,31 @@ describe('persisted state codec', () => {
     expect(persisted.galleryInputDraft).toBeNull()
   })
 
+  it('persists mask draft by image id once the mask is stored', () => {
+    const persisted = createPersistedState(source({
+      maskDraft: { targetImageId: 'image-a', maskDataUrl: 'data:image/png;base64,mask', maskImageId: 'mask-a', updatedAt: 1 },
+    }))
+
+    expect(persisted.galleryInputDraft?.maskDraft).toEqual({
+      targetImageId: 'image-a',
+      maskDataUrl: '',
+      maskImageId: 'mask-a',
+      updatedAt: 1,
+    })
+  })
+
+  it('keeps mask data url while the mask has not been stored yet', () => {
+    const persisted = createPersistedState(source({
+      maskDraft: { targetImageId: 'image-a', maskDataUrl: 'data:image/png;base64,mask', updatedAt: 1 },
+    }))
+
+    expect(persisted.galleryInputDraft?.maskDraft).toEqual({
+      targetImageId: 'image-a',
+      maskDataUrl: 'data:image/png;base64,mask',
+      updatedAt: 1,
+    })
+  })
+
   it('normalizes malformed gallery input and favorite state', () => {
     const result = normalizePersistedState({
       settings,

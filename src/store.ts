@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import type {
   ApiMode,
   ApiProfile,
@@ -53,6 +53,7 @@ import { hasActiveDataOperations } from './lib/dataOperations'
 import { formatExportFileTime } from './lib/exportFileName'
 import { buildExportZip, createExportBlob, getExportImageEstimatedBytes, getExportZipPlan, MAX_EXPORT_ZIP_BYTES, readExportZip, readExportZipFileAsDataUrl, readExportZipManifest } from './lib/exportZip'
 import { isEmptyInputDraft, restoreGalleryInputDraftState, syncActiveInputDraft, updateInputDraftImages } from './lib/inputDraftState'
+import { debouncedStateStorage } from './lib/persistStorage'
 import { ALL_FAVORITES_COLLECTION_ID, DEFAULT_FAVORITE_COLLECTION_ID, createDefaultFavoriteCollection, deleteFavoriteCollectionState, ensureDefaultFavoriteCollection, getTaskFavoriteCollectionIds, mergeFavoriteCollections, normalizeFavoriteCollectionIds, normalizeFavoriteCollectionName, normalizeFavoriteCollections, normalizeFavoritePatch, normalizeLoadedFavoriteState, resolveDefaultFavoriteCollectionId, sameFavoriteCollectionIds } from './lib/favoriteState'
 import { createPersistedState, migratePersistedState, normalizePersistedState } from './lib/persistedState'
 import { addImageSizeParam, createTaskDonePatch, createTaskErrorPatch, deriveGalleryActualParams, firstActualParams, hasActualParams, hasActualSizeParam, mapActualParamsByImage, mapRevisedPromptsByImage, markInterruptedOpenAIRunningTasks } from './lib/taskState'
@@ -480,7 +481,7 @@ export const useStore = create<AppState>()(
           return syncActiveInputDraft(s, updateInputDraftImages(s, images, { clearMissingMask: false }))
         }),
       maskDraft: null,
-      setMaskDraft: (maskDraft) =>
+      setMaskDraft: (maskDraft) => {
         set((s) => {
           const inputImages = orderImagesWithMaskFirst(s.inputImages, maskDraft?.targetImageId)
           return syncActiveInputDraft(s, {
@@ -488,7 +489,18 @@ export const useStore = create<AppState>()(
             inputImages,
             prompt: remapImageMentionsForOrder(s.prompt, s.inputImages, inputImages),
           })
-        }),
+        })
+        // 遮罩 PNG 常达数 MB，不能进 localStorage：异步入库后草稿只持久化 maskImageId
+        if (maskDraft?.maskDataUrl) {
+          void storeImage(maskDraft.maskDataUrl, 'mask')
+            .then((maskImageId) => {
+              const s = get()
+              if (!s.maskDraft || s.maskDraft !== maskDraft || s.maskDraft.maskImageId === maskImageId) return
+              set(syncActiveInputDraft(s, { maskDraft: { ...s.maskDraft, maskImageId } }))
+            })
+            .catch((err) => console.warn('遮罩图片入库失败', err))
+        }
+      },
       clearMaskDraft: () => set((s) => syncActiveInputDraft(s, { maskDraft: null })),
       maskEditorImageId: null,
       setMaskEditorImageId: (maskEditorImageId) => {
@@ -661,6 +673,7 @@ export const useStore = create<AppState>()(
       name: 'gpt-image-playground',
       version: 2,
       skipHydration: true,
+      storage: createJSONStorage(() => debouncedStateStorage),
       migrate: migratePersistedState,
       partialize: getPersistedState,
       merge: mergePersistedState,
@@ -1181,6 +1194,12 @@ export async function cleanupUnreferencedImages(tasks?: TaskRecord[], isCurrent 
       thumbnailIds.add(image.id)
     }
   }
+  // 草稿遮罩按 ID 入库，未随任务提交时也要计入引用，避免启动清理误删
+  const draftMaskImageId = state.maskDraft?.maskImageId ?? state.galleryInputDraft?.maskDraft?.maskImageId
+  if (draftMaskImageId) {
+    referencedIds.add(draftMaskImageId)
+    thumbnailIds.add(draftMaskImageId)
+  }
   for (const task of currentTasks) {
     addTaskReferencedImageIds(referencedIds, task)
     // 仅作为流式中间图引用的图片没有缩略图也不需要补，排除出回填队列
@@ -1289,6 +1308,24 @@ export async function initStore(options: { deferImageCleanup?: boolean } = {}) {
         galleryInputDraft: nextGalleryInputDraft,
         ...restoreGalleryInputDraftState(nextGalleryInputDraft),
       })
+    }
+
+    // 草稿遮罩只持久化了 maskImageId，恢复时从 IndexedDB/远端取回原图供预览使用
+    const draftMask = useStore.getState().maskDraft
+    if (draftMask?.maskImageId && !draftMask.maskDataUrl) {
+      const maskDataUrl = await ensureImageCached(draftMask.maskImageId)
+      if (maskDataUrl) {
+        const draftState = useStore.getState()
+        const nextMaskDraft = { ...draftMask, maskDataUrl }
+        const galleryInputDraft = draftState.galleryInputDraft
+        const nextGalleryInputDraft = galleryInputDraft && galleryInputDraft.maskDraft?.maskImageId === draftMask.maskImageId
+          ? { ...galleryInputDraft, maskDraft: nextMaskDraft }
+          : null
+        useStore.setState({
+          maskDraft: nextMaskDraft,
+          ...(nextGalleryInputDraft ? { galleryInputDraft: nextGalleryInputDraft } : {}),
+        })
+      }
     }
   }
 }

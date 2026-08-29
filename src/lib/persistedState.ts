@@ -88,8 +88,16 @@ export function createPersistedState(state: PersistedStateSource): PersistedAppS
         }
       : {}),
     dismissedCodexCliPrompts: state.dismissedCodexCliPrompts,
+    // 遮罩原图常达数 MB，不进 localStorage：入库后只保留 maskImageId，恢复时按 ID 取回。
+    // maskImageId 尚未回填（入库是异步的）时暂留原图，避免刚画完遮罩就关页签导致遮罩丢失。
     galleryInputDraft: settings.persistInputOnRestart && galleryInputDraft
-      ? { ...galleryInputDraft, inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '' })) }
+      ? {
+          ...galleryInputDraft,
+          inputImages: galleryInputDraft.inputImages.map((img) => ({ id: img.id, dataUrl: '' })),
+          ...(galleryInputDraft.maskDraft
+            ? { maskDraft: { ...galleryInputDraft.maskDraft, maskDataUrl: galleryInputDraft.maskDraft.maskImageId ? '' : galleryInputDraft.maskDraft.maskDataUrl } }
+            : {}),
+        }
       : null,
     favoriteCollections: state.favoriteCollections,
     defaultFavoriteCollectionId: state.defaultFavoriteCollectionId,
