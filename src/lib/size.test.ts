@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateImageSize, convertSizeParamFormat, getImageAspectRatio, normalizeCodexCliImageSize, prependCodexCliSizePrompt, stripInjectedCodexCliSizePrompt } from './size'
+import { calculateImageSize, convertSizeParamFormat, getAspectRatioSnap, getImageAspectRatio, normalizeCodexCliImageSize, prependCodexCliSizePrompt, stripInjectedCodexCliSizePrompt } from './size'
 
 describe('convertSizeParamFormat', () => {
   it('converts pixel sizes to simplified ratios in ratio mode', () => {
@@ -8,9 +8,26 @@ describe('convertSizeParamFormat', () => {
     expect(convertSizeParamFormat('1280x720', 'ratio')).toBe('16:9')
   })
 
+  it('snaps near-standard pixel sizes to common ratios in ratio mode', () => {
+    expect(convertSizeParamFormat('1920x816', 'ratio')).toBe('21:9')
+    expect(convertSizeParamFormat('1280x544', 'ratio')).toBe('21:9')
+    expect(convertSizeParamFormat('896x1152', 'ratio')).toBe('3:4')
+    expect(convertSizeParamFormat('1152x896', 'ratio')).toBe('4:3')
+    expect(convertSizeParamFormat('1216x832', 'ratio')).toBe('3:2')
+  })
+
   it('keeps existing ratios untouched in ratio mode', () => {
     expect(convertSizeParamFormat('2:3', 'ratio')).toBe('2:3')
     expect(convertSizeParamFormat('auto', 'ratio')).toBe('auto')
+  })
+
+  it('snaps to the grok imagine ratio set regardless of tolerance for that model', () => {
+    const snap = getAspectRatioSnap('grok-imagine-image-2.0')
+    expect(convertSizeParamFormat('1920x816', 'ratio', snap)).toBe('2:1')
+    expect(convertSizeParamFormat('1024x768', 'ratio', snap)).toBe('4:3')
+    expect(convertSizeParamFormat('768x1024', 'ratio', snap)).toBe('3:4')
+    expect(convertSizeParamFormat('896x1152', 'ratio', snap)).toBe('3:4')
+    expect(getAspectRatioSnap('gpt-image-1').maxError).toBeLessThan(1)
   })
 
   it('converts ratios to pixel sizes in size mode', () => {
@@ -49,6 +66,18 @@ describe('getImageAspectRatio', () => {
     expect(getImageAspectRatio('2560x1440')).toBe('16:9')
     expect(getImageAspectRatio('1440x2160')).toBe('2:3')
     expect(getImageAspectRatio('auto')).toBeUndefined()
+  })
+
+  it('snaps non-standard reductions to the nearest common ratio', () => {
+    expect(getImageAspectRatio('1920x816')).toBe('21:9')
+    expect(getImageAspectRatio('7:3')).toBe('21:9')
+    expect(getImageAspectRatio('2.39:1')).toBe('21:9')
+    expect(getImageAspectRatio('1344x768')).toBe('16:9')
+  })
+
+  it('keeps strictly reduced ratios far from common ones', () => {
+    expect(getImageAspectRatio('1024x384')).toBe('8:3')
+    expect(getImageAspectRatio('5:3')).toBe('5:3')
   })
 })
 

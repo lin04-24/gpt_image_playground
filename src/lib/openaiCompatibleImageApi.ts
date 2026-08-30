@@ -22,7 +22,7 @@ import {
   PROMPT_REWRITE_GUARD_PREFIX,
 } from './imageApiShared'
 import { isEventStreamResponse, readJsonServerSentEvents } from './serverSentEvents'
-import { convertSizeParamFormat, getImageAspectRatio, isGrokImagineImageModel, prependImageSizePrompt } from './size'
+import { convertSizeParamFormat, getAspectRatioSnap, getImageAspectRatio, isGrokImagineImageModel, prependImageSizePrompt } from './size'
 
 function getStreamPartialImages(profile: ApiProfile): number {
   return profile.streamPartialImages ?? DEFAULT_STREAM_PARTIAL_IMAGES
@@ -137,7 +137,7 @@ function createResponsesImageTool(
   }
 
   if (isGrokImagineImageModel(profile.model)) {
-    const aspectRatio = getImageAspectRatio(params.size)
+    const aspectRatio = getImageAspectRatio(params.size, getAspectRatioSnap(profile.model))
     if (aspectRatio) tool.aspect_ratio = aspectRatio
   } else if (!profile.codexCli) {
     tool.size = params.size
@@ -410,8 +410,10 @@ async function parseResponsesApiStreamResponse(
 }
 
 export async function callOpenAICompatibleImageApi(opts: CallApiOptions, profile: ApiProfile, customProvider?: CustomProviderDefinition | null): Promise<CallApiResult> {
-  // 在入口统一按配置转换 size 格式，responses/images/自定义服务商模板三条路径都从这里取参数
-  const size = convertSizeParamFormat(opts.params.size, profile.sizeParamFormat ?? 'ratio')
+  // 在入口统一按配置转换 size 格式，responses/images/自定义服务商模板三条路径都从这里取参数；
+  // 吸附标签集合按模型选择（如 grok-imagine-image-2.0 只接受其上游支持的宽高比）
+  const aspectSnap = getAspectRatioSnap(profile.model)
+  const size = convertSizeParamFormat(opts.params.size, profile.sizeParamFormat ?? 'ratio', aspectSnap)
   const baseOpts = size === opts.params.size
     ? opts
     : { ...opts, params: { ...opts.params, size } }
@@ -599,7 +601,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       formData.append('model', profile.model)
       formData.append('prompt', prompt)
       if (isGrokImagineImageModel(profile.model)) {
-        const aspectRatio = getImageAspectRatio(params.size)
+        const aspectRatio = getImageAspectRatio(params.size, getAspectRatioSnap(profile.model))
         if (aspectRatio) formData.append('aspect_ratio', aspectRatio)
       } else if (!profile.codexCli) {
         formData.append('size', params.size)
@@ -662,7 +664,7 @@ async function callImagesApiSingle(opts: CallApiOptions, profile: ApiProfile): P
       }
 
       if (isGrokImagineImageModel(profile.model)) {
-        const aspectRatio = getImageAspectRatio(params.size)
+        const aspectRatio = getImageAspectRatio(params.size, getAspectRatioSnap(profile.model))
         if (aspectRatio) body.aspect_ratio = aspectRatio
       } else if (!profile.codexCli) {
         body.size = params.size

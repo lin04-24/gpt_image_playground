@@ -135,6 +135,32 @@ describe('callImageApi', () => {
     expect(body.prompt).toBe('prompt')
   })
 
+  it('maps unsupported grok ratios like 21:9 to the nearest supported one', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ b64_json: 'aW1hZ2U=' }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    await callImageApi({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        model: 'grok-imagine-image-2.0',
+        generationModel: 'grok-imagine-image-2.0',
+        profiles: DEFAULT_SETTINGS.profiles.map((profile) => ({ ...profile, model: 'grok-imagine-image-2.0' })),
+      },
+      prompt: 'prompt',
+      params: { ...DEFAULT_PARAMS, size: '1920x816' },
+      inputImageDataUrls: [],
+    })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(String((init as RequestInit).body))
+    expect(body.aspect_ratio).toBe('2:1')
+  })
+
   it('does not add a size hint for auto in Codex CLI mode', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       data: [{ b64_json: 'aW1hZ2U=' }],
