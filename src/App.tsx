@@ -11,6 +11,7 @@ import Header from './components/Header'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
 import InputBar from './components/InputBar'
+import BackToTopButton from './components/BackToTopButton'
 import DetailModal from './components/DetailModal'
 import Lightbox from './components/Lightbox'
 import SettingsModal from './components/SettingsModal'
@@ -223,6 +224,7 @@ function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
         </div>
       </main>
       <InputBar />
+      <BackToTopButton />
       <DetailModal />
       <Lightbox />
       <SettingsModal />
