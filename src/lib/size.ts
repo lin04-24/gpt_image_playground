@@ -9,6 +9,47 @@ const MIN_PIXELS = 655_360
 const MAX_PIXELS = 8_294_400
 const MAX_1K_PIXELS = 1_572_864
 
+// 常用比例标签：显示与请求侧 aspect_ratio 转换共用
+const STANDARD_ASPECT_RATIOS: Array<[number, number]> = [
+  [1, 1],
+  [4, 3],
+  [3, 4],
+  [3, 2],
+  [2, 3],
+  [16, 9],
+  [9, 16],
+  [21, 9],
+  [9, 21],
+]
+// 与常用比例相对误差超过该值时不吸附，保留严格约分结果
+const MAX_STANDARD_RATIO_SNAP_ERROR = 0.04
+
+// grok-imagine-image-2.0 上游（grok2api 的 web/console 两表交集）只接受这组比例标签，21:9/9:21 不在其中。
+// 对该模型吸附不限容差：发不支持的标签必然报错，就近落到 2:1 这类近似比例优于失败
+const GROK_IMAGINE_ASPECT_RATIOS: Array<[number, number]> = [
+  [1, 1],
+  [4, 3],
+  [3, 4],
+  [3, 2],
+  [2, 3],
+  [16, 9],
+  [9, 16],
+  [2, 1],
+  [1, 2],
+]
+
+interface AspectRatioSnapOptions {
+  labels: Array<[number, number]>
+  maxError: number
+}
+
+export function getAspectRatioSnap(model: string): AspectRatioSnapOptions {
+  if (isGrokImagineImageModel(model)) {
+    return { labels: GROK_IMAGINE_ASPECT_RATIOS, maxError: Number.POSITIVE_INFINITY }
+  }
+  return { labels: STANDARD_ASPECT_RATIOS, maxError: MAX_STANDARD_RATIO_SNAP_ERROR }
+}
+
 export function isGrokImagineImageModel(model: string) {
   return model.trim().toLowerCase() === 'grok-imagine-image-2.0'
 }
@@ -98,10 +139,24 @@ export function prependImageSizePrompt(prompt: string, size: string) {
   return `${hint} ${trimmed}`
 }
 
-export function getImageAspectRatio(size: string) {
+export function getImageAspectRatio(size: string, snap: AspectRatioSnapOptions = { labels: STANDARD_ASPECT_RATIOS, maxError: MAX_STANDARD_RATIO_SNAP_ERROR }) {
   const parsed = parseRatio(size)
-  if (!parsed || !Number.isInteger(parsed.width) || !Number.isInteger(parsed.height)) return undefined
+  if (!parsed) return undefined
 
+  // 预设像素尺寸经 16 倍数规整后严格约分常不是常用比例（如 1920x816 → 40:17、896x1152 → 7:9），
+  // 而模型一般只接受常用比例标签，按 snap 的标签集合与容差就近吸附
+  const value = parsed.width / parsed.height
+  let nearest: { label: string, delta: number } | null = null
+  for (const [ratioWidth, ratioHeight] of snap.labels) {
+    const standard = ratioWidth / ratioHeight
+    const delta = Math.abs(value - standard) / standard
+    if (delta <= snap.maxError && (!nearest || delta < nearest.delta)) {
+      nearest = { label: `${ratioWidth}:${ratioHeight}`, delta }
+    }
+  }
+  if (nearest) return nearest.label
+
+  if (!Number.isInteger(parsed.width) || !Number.isInteger(parsed.height)) return undefined
   const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b)
   const divisor = gcd(parsed.width, parsed.height)
   return `${parsed.width / divisor}:${parsed.height / divisor}`
@@ -150,19 +205,8 @@ export function formatImageRatio(width: number, height: number) {
   const simplifiedWidth = roundedWidth / divisor
   const simplifiedHeight = roundedHeight / divisor
   const simplified = `${simplifiedWidth}:${simplifiedHeight}`
-  const commonRatios = [
-    [1, 1],
-    [4, 3],
-    [3, 4],
-    [3, 2],
-    [2, 3],
-    [16, 9],
-    [9, 16],
-    [21, 9],
-    [9, 21],
-  ]
 
-  for (const [commonWidth, commonHeight] of commonRatios) {
+  for (const [commonWidth, commonHeight] of STANDARD_ASPECT_RATIOS) {
     if (simplifiedWidth === commonWidth && simplifiedHeight === commonHeight) {
       return simplified
     }
@@ -172,7 +216,7 @@ export function formatImageRatio(width: number, height: number) {
   const squareDelta = Math.abs(actualRatio - 1)
   if (squareDelta <= 0.18) return '≈1:1'
 
-  const nearest = commonRatios
+  const nearest = STANDARD_ASPECT_RATIOS
     .map(([commonWidth, commonHeight]) => {
       const ratio = commonWidth / commonHeight
       return {
@@ -310,16 +354,16 @@ export function calculateImageSize(tier: SizeTier, ratio: string) {
 
 /**
  * 按配置的格式转换 size 参数，使发送给接口的值符合所选模式：
- * 宽高比模式下把像素尺寸转为简化比例（1024x1536 → 2:3），
+ * 宽高比模式下把像素尺寸转为常用比例（1024x1536 → 2:3，非标准约分按 snap 就近吸附，1920x816 → 21:9），
  * 像素尺寸模式下把比例转为 1K 档位像素（2:3 → 1024x1536）。
  * 无法解析或转换失败时原样返回，由接口自行报错。
  */
-export function convertSizeParamFormat(size: string, format: SizeParamFormat) {
+export function convertSizeParamFormat(size: string, format: SizeParamFormat, snap: AspectRatioSnapOptions = { labels: STANDARD_ASPECT_RATIOS, maxError: MAX_STANDARD_RATIO_SNAP_ERROR }) {
   const trimmed = size.trim()
   if (!trimmed || trimmed === 'auto') return size
 
   if (format === 'ratio') {
-    return getImageAspectRatio(trimmed) ?? size
+    return getImageAspectRatio(trimmed, snap) ?? size
   }
 
   if (SIZE_PATTERN.test(trimmed)) return normalizeImageSize(trimmed)
