@@ -41,6 +41,18 @@ export default function TaskGrid() {
   const respectReducedMotion = useStore((s) => s.settings.respectReducedMotion)
   const prefersReducedMotion = usePrefersReducedMotion()
   const animateLayout = !(respectReducedMotion && prefersReducedMotion)
+  // 页码跳转输入框的草稿值；页码因翻页/SSE 变化时同步回当前页
+  const [pageInput, setPageInput] = useState(String(backendPage.page))
+  useEffect(() => { setPageInput(String(backendPage.page)) }, [backendPage.page])
+
+  const commitPageJump = () => {
+    const next = Math.trunc(Number(pageInput))
+    if (Number.isFinite(next) && next >= 1 && next <= backendPage.totalPages && next !== backendPage.page) {
+      setBackendPage(next)
+      return
+    }
+    setPageInput(String(backendPage.page))
+  }
 
   const filteredTasks = useMemo(() => {
     if (backendEnabled) return backendPage.initialized ? tasks.slice(0, backendPage.pageSize) : []
@@ -386,8 +398,24 @@ export default function TaskGrid() {
           >
             <ChevronLeftIcon className="h-4 w-4" />
           </button>
-          <span className="min-w-[7rem] text-center text-sm text-gray-600 dark:text-gray-300">
-            第 {backendPage.page} / {backendPage.totalPages} 页
+          <span className="flex min-w-[8.5rem] items-center justify-center gap-1.5 text-sm text-gray-600 dark:text-gray-300">
+            第
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label="跳转到指定页"
+              title="输入页码，回车跳转"
+              value={pageInput}
+              onChange={(e) => setPageInput(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              onBlur={commitPageJump}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitPageJump()
+                if (e.key === 'Escape') setPageInput(String(backendPage.page))
+              }}
+              className="h-9 w-14 rounded-md border border-gray-200 bg-white text-center text-sm text-gray-600 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300"
+            />
+            / {backendPage.totalPages} 页
           </span>
           <button
             type="button"
