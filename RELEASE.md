@@ -1,3 +1,22 @@
+# V3.4.4（2026-08-30）
+
+### 功能
+- 后端模式性能修复：任意 task.* SSE 事件触发的整页同步不再造成任务网格整体重渲染。原先同步合并用 `JSON.stringify` 比较任务内容，而占位任务替换后带有的前端专用 `beamPhase` 字段使比较永远失配——生成期间每条进度/流式事件都会让所有 TaskCard 的 memo 失效，手机上等于每秒多次全网格 render，同时把整页任务全量回写 IndexedDB。现改为按 id 递归比较内容（忽略 beamPhase），未变化的任务复用原对象引用，memo 持续生效。
+
+### 实现说明
+- 新增递归 `jsonEqual` 比较器（命中首个差异即短路返回，无序列化分配），取代双份 `JSON.stringify` 全量序列化比较；`taskContentEqual` 忽略 beamPhase 后比较，内容相等的任务直接复用原引用，内容变化时才新建对象并继承 beamPhase（流光相位不跳变）。
+- 两级短路：合并结果与旧列表逐项同引用时，跳过 `useStore.setState` 与全部 `putTask` 回写——进度类事件对 TaskRecord 往往无字段变化，等于零渲染零 IO；列表有变化时也只回写内容变化的任务，不再全量重写整页。
+- `setPageState` 字段全等时跳过监听通知；首次同步完成后后台刷新不再把 `pageState.loading` 翻转为 true——之前每次 SSE 事件都会让翻页按钮禁用/恢复闪烁，并多出两次 TaskGrid 渲染。
+- `updateUrl` 在目标 URL 与当前一致时跳过 `history.replaceState`，避免高频事件反复触碰浏览器 replaceState 频率限制。
+- 新增 `backendSync.test.ts`（5 项用例）：未变化任务复用引用且零 setState/零回写、变化时保留 beamPhase 且只回写变化任务、嵌套字段深比较复用、整页未变化跳过 setState、本地占位卡片合并。
+
+### 升级说明
+- 未修改 README、数据库结构、持久化字段或公开 API，升级无需迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（35 个测试文件，266 项测试）。
+
 # V3.4.3（2026-08-30）
 
 ### 功能
