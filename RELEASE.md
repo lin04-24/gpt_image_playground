@@ -1,3 +1,22 @@
+# V3.4.1（2026-08-30）
+
+### 功能
+- 手机端（视口宽度 <640px）常驻屏幕的固定元素停用 backdrop-filter 毛玻璃，背景不透明度统一提高至 95% 兜底观感，桌面端保持现状。fixed 元素带 backdrop-blur 时，手机 GPU（尤其 iOS Safari）每帧都要对滚动到其下方的整块内容重新模糊，是移动端滚动时持续的合成开销。
+
+### 实现说明
+- 涉及四个常驻固定元素：Header（`blur(8px)` + 80%）、底部输入条卡片（`blur(40px)` + 70%）、回到顶部按钮（`blur(8px)` + 90%）、生成/多选期间常驻的批量操作条（`blur(8px)` + 90%）。
+- 实现为纯 Tailwind 类降级：各元素追加 `max-sm:backdrop-blur-none max-sm:bg-white/95 max-sm:dark:bg-<原色>/95`，断点与布局既有的 `sm:` 一致。Tailwind 3.4 的 `backdrop-blur-none` 将模糊变量置空使 `backdrop-filter` 落回 `none`，产物 CSS 中 `max-sm:` 规则位于原规则之后，覆盖成立；`max-sm:dark:bg-*` 编译为嵌套 media query，深浅色各自保留原色调（白/zinc）仅提高 alpha。
+- 断点选用宽度而非 `(hover: none) and (pointer: coarse)`，使模糊关闭与背景提亮的生效条件严格一致，避免宽屏触屏设备出现「无模糊但背景仍半透明」的观感错位；平板 GPU 处理此类模糊压力不大，维持原样。
+- 弹窗类（Lightbox、遮罩编辑器工具栏、抽屉遮罩等仅打开期间存在的 backdrop-blur）本次未改动。
+- 已在 Chromium 实测：390px 视口下三个常驻元素 `backdrop-filter` 计算值均为 `none`、背景 alpha 均为 0.95；1280px 视口下模糊半径与背景 alpha 与改动前逐项一致。
+
+### 升级说明
+- 未修改 README、数据库结构、持久化字段或公开 API，升级无需迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（34 个测试文件，261 项测试）。
+
 # V3.4.0（2026-08-30）
 
 ### 功能
