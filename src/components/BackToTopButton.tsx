@@ -32,7 +32,7 @@ export default function BackToTopButton() {
       aria-hidden={!visible}
       tabIndex={visible ? 0 : -1}
       onClick={() => window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' })}
-      className={`fixed bottom-24 sm:bottom-28 right-4 sm:right-6 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-gray-600 shadow-lg backdrop-blur transition-all duration-200 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900/90 dark:text-gray-300 dark:hover:bg-white/[0.06] ${visible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'}`}
+      className={`fixed bottom-24 sm:bottom-28 right-4 sm:right-6 z-30 flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-gray-600 shadow-lg backdrop-blur max-sm:backdrop-blur-none max-sm:bg-white/95 max-sm:dark:bg-gray-900/95 transition-all duration-200 hover:bg-gray-50 dark:border-white/[0.08] dark:bg-gray-900/90 dark:text-gray-300 dark:hover:bg-white/[0.06] ${visible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'}`}
     >
       <ArrowUpIcon className="h-5 w-5" />
     </button>

@@ -60,7 +60,8 @@ export default function Header() {
 
   return (
     <>
-      <header data-no-drag-select className={`safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08] header-scroll-shadow${isScrolled ? ' is-scrolled' : ''}`}>
+      {/* 手机端禁用常驻毛玻璃：fixed 元素带 backdrop-filter 时手机 GPU 每帧都要对滚动到其下方的整块内容重新模糊，改为提高背景不透明度兜底观感 */}
+      <header data-no-drag-select className={`safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur max-sm:backdrop-blur-none max-sm:bg-white/95 max-sm:dark:bg-gray-950/95 border-b border-gray-200 dark:border-white/[0.08] header-scroll-shadow${isScrolled ? ' is-scrolled' : ''}`}>
         <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between relative">
           <div className="flex-1 min-w-0 pr-2 flex items-center gap-2">
             <h1 className="inline-flex min-w-0 items-start relative mr-2">

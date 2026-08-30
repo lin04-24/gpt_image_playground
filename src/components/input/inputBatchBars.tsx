@@ -73,7 +73,7 @@ export default function InputBatchBars({
   if (showFavoriteCollectionBatchBar) {
     return (
       <div className="flex justify-center mb-3">
-        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
+        <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur max-sm:backdrop-blur-none max-sm:bg-white/95 max-sm:dark:bg-gray-800/95 shadow-[0_8px_30px_rgb(0,0,0,0.12)] dark:shadow-lg rounded-full flex items-center p-1 border border-gray-200/50 dark:border-white/10 pointer-events-auto">
           <BatchActionButton
             onClick={clearFavoriteCollectionSelection}
             className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"

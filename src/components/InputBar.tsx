@@ -1612,7 +1612,7 @@ export default function InputBar() {
           onDownloadSelected={handleDownloadSelected}
           onDeleteSelected={handleDeleteSelected}
         />
-        <div ref={cardRef} className="flex items-stretch rounded-2xl sm:rounded-full bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] p-1.5 ring-1 ring-black/5 dark:ring-white/10">
+        <div ref={cardRef} className="flex items-stretch rounded-2xl sm:rounded-full bg-white/70 dark:bg-gray-900/70 backdrop-blur-2xl max-sm:backdrop-blur-none max-sm:bg-white/95 max-sm:dark:bg-gray-900/95 border border-white/50 dark:border-white/[0.08] shadow-[0_8px_30px_rgb(0,0,0,0.08)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] p-1.5 ring-1 ring-black/5 dark:ring-white/10">
           <button
             type="button"
             onClick={() => setDrawerOpen(true)}
