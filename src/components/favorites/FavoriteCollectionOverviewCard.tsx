@@ -100,7 +100,11 @@ export function FavoriteCollectionOverviewCard({
 
   const applySwipeOffset = (offset: number) => {
     swipeOffsetRef.current = offset
-    if (cardRef.current) cardRef.current.style.transform = offset ? `translateX(${offset}px)` : ''
+    if (cardRef.current) {
+      cardRef.current.style.transform = offset ? `translateX(${offset}px)` : ''
+      // 偏移归零即释放合成层，静止卡片不常驻 will-change
+      cardRef.current.style.willChange = offset ? 'transform' : ''
+    }
   }
 
   const cancelSwipeFrame = () => {
@@ -146,6 +150,8 @@ export function FavoriteCollectionOverviewCard({
     setSwipeDirection(0)
     cancelSwipeFrame()
     applySwipeOffset(0)
+    // 按下即预提升合成层，首次位移帧不必临时建层
+    if (cardRef.current) cardRef.current.style.willChange = 'transform'
     setIsSwiping(true)
   }
 
@@ -214,7 +220,7 @@ export function FavoriteCollectionOverviewCard({
       </div>
       <article
         ref={cardRef}
-        className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${!isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'} ${isSelected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50' : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'}`}
+        className={`relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y duration-200 hover:shadow-lg dark:hover:bg-gray-800/80 ${!isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'} ${isSelected ? 'border-blue-500 shadow-md ring-2 ring-blue-500/50' : 'border-gray-200 dark:border-white/[0.08] hover:border-gray-300 dark:hover:border-white/[0.18]'}`}
         onClick={(e) => {
           if (Date.now() < suppressClickUntilRef.current || Date.now() < suppressSwipeClickUntilRef.current) {
             e.preventDefault()

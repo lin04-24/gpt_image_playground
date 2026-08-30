@@ -117,6 +117,8 @@ function TaskCard({
     swipeOffsetRef.current = offset
     if (cardRef.current) {
       cardRef.current.style.transform = offset ? `translateX(${offset}px)` : ''
+      // 偏移归零即释放合成层：will-change 常驻会让每张可见卡片各占一层，手机显存开销大
+      cardRef.current.style.willChange = offset ? 'transform' : ''
     }
   }
 
@@ -181,6 +183,8 @@ function TaskCard({
     updateSwipeDirection(0)
     cancelSwipeFrame()
     applySwipeOffset(0)
+    // 按下即预提升合成层，首次位移帧不必临时建层
+    if (cardRef.current) cardRef.current.style.willChange = 'transform'
     setIsSwiping(true)
   }
 
@@ -389,7 +393,7 @@ function TaskCard({
 
       <div
         ref={cardRef}
-        className={`task-card relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y will-change-transform duration-200 dark:hover:bg-gray-800/80 ${
+        className={`task-card relative bg-white dark:bg-gray-900 rounded-xl border overflow-hidden cursor-pointer touch-pan-y duration-200 dark:hover:bg-gray-800/80 ${
           isSwiping ? '!bg-white dark:!bg-gray-900' : ''
         } ${
           !isSwiping ? 'transition-[box-shadow,border-color,background-color,transform]' : 'transition-[box-shadow,border-color,background-color]'
