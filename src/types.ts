@@ -111,7 +111,7 @@ export interface AppSettings {
   allowPromptRewrite: boolean
   taskCompletionNotification: boolean
   skipTaskDeletionConfirmation: boolean
-  /** 无障碍：系统启用"减少动态效果"时，网格重排等动画优雅降级为直接呈现 */
+  /** 无障碍：true 为强制减动效档位（不依赖系统设置）；false 时仍遵循系统"减少动态效果" */
   respectReducedMotion: boolean
   enterSubmit: boolean
   zipDownloadRoutes: ZipDownloadRoute[]

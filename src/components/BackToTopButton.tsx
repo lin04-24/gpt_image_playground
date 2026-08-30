@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useStore } from '../store'
-import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
+import { useReduceMotion } from '../hooks/useReduceMotion'
 import { ArrowUpIcon } from './icons'
 
 // 滚动超过页面可滚动距离中点（下半区域）后浮现，点击回到顶部
 export default function BackToTopButton() {
   const [visible, setVisible] = useState(false)
-  const respectReducedMotion = useStore((s) => s.settings.respectReducedMotion)
-  const prefersReducedMotion = usePrefersReducedMotion()
-  const reduceMotion = respectReducedMotion && prefersReducedMotion
+  const reduceMotion = useReduceMotion()
 
   useEffect(() => {
     const onScroll = () => {

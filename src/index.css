@@ -302,14 +302,14 @@ html.reduce-motion .border-beam-overlay {
   }
 }
 
-/* 无障碍联动：设置开启"遵循系统减少动态效果"且系统启用该模式时，恢复纯色文字 */
+/* 无障碍联动：减动效生效（应用内强制开关或系统设置）时，恢复纯色文字 */
 html.reduce-motion .metallic-shimmer-text {
   animation: none;
   background-image: none;
   -webkit-text-fill-color: currentColor;
 }
 
-/* 无障碍降级：设置开启"遵循系统减少动态效果"且系统启用该模式时，压缩全局装饰性动画 */
+/* 无障碍降级：减动效生效（应用内强制开关或系统设置）时，压缩全局装饰性动画 */
 html.reduce-motion *,
 html.reduce-motion *::before,
 html.reduce-motion *::after {
@@ -502,7 +502,7 @@ input[type="number"] {
   animation: dropdown-item-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: calc(var(--stagger-i, 0) * 30ms);
 }
-/* 无障碍联动：应用内「遵循系统减少动态效果」开关生效时下拉动画即时呈现 */
+/* 无障碍联动：减动效生效（应用内强制开关或系统设置）时下拉动画即时呈现 */
 html.reduce-motion .animate-dropdown-down,
 html.reduce-motion .animate-dropdown-up,
 html.reduce-motion .animate-dropdown-down-out,

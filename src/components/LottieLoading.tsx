@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 import lottie from 'lottie-web/build/player/lottie_light'
 import type { AnimationItem } from 'lottie-web'
 import rawAnimData from '../assets/lottieflow-loading-04-2-000000-easey.json'
-import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
+import { useReduceMotion } from '../hooks/useReduceMotion'
 
 // 原素材描边为纯黑，暗色模式下不可见，统一染成 blue-400（sRGB 0-1 分量）
 const STROKE_COLOR = [0.376, 0.647, 0.98, 1]
@@ -31,7 +31,7 @@ interface Props {
 
 function LottieLoading({ className }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const reduceMotion = usePrefersReducedMotion()
+  const reduceMotion = useReduceMotion()
 
   useEffect(() => {
     const el = containerRef.current

@@ -199,20 +199,20 @@ export default function GeneralSettingsTab({
       </div>
       <div className="block">
         <div className="mb-1 flex items-center justify-between">
-          <span className="block text-sm text-gray-600 dark:text-gray-300">遵循系统减少动态效果</span>
+          <span className="block text-sm text-gray-600 dark:text-gray-300">强制减弱动态效果</span>
           <button
             type="button"
             onClick={() => commitSettings({ ...draft, respectReducedMotion: !draft.respectReducedMotion })}
             className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${draft.respectReducedMotion ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
             role="switch"
             aria-checked={draft.respectReducedMotion}
-            aria-label="遵循系统减少动态效果"
+            aria-label="强制减弱动态效果"
           >
             <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${draft.respectReducedMotion ? 'translate-x-[14px]' : 'translate-x-[2px]'}`} />
           </button>
         </div>
         <div data-selectable-text className="text-xs text-gray-500 dark:text-gray-500">
-          开启后，系统启用“减少动态效果”（无障碍）模式时，动画会优雅降级为直接呈现；关闭后始终播放动画。
+          开启后强制停用扫光标题、流光边框等每帧重绘的动画并即时呈现过渡，不依赖系统的“减少动态效果”设置；关闭时仅在系统启用该无障碍模式时降级。
         </div>
       </div>
     </div>

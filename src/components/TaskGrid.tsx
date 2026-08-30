@@ -6,7 +6,7 @@ import { getBackendPageState, setBackendPage, subscribeBackendPage } from '../li
 import { ChevronLeftIcon, ChevronRightIcon } from './icons'
 import TaskCard from './TaskCard'
 import { useGridLayoutTransition } from '../hooks/useGridLayoutTransition'
-import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion'
+import { useReduceMotion } from '../hooks/useReduceMotion'
 
 const IS_MAC = /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 
@@ -38,9 +38,7 @@ export default function TaskGrid() {
   const initialSelection = useRef<string[]>([])
   const backendEnabled = import.meta.env.VITE_BACKEND_API === 'true'
   const backendPage = useSyncExternalStore(subscribeBackendPage, getBackendPageState, getBackendPageState)
-  const respectReducedMotion = useStore((s) => s.settings.respectReducedMotion)
-  const prefersReducedMotion = usePrefersReducedMotion()
-  const animateLayout = !(respectReducedMotion && prefersReducedMotion)
+  const animateLayout = !useReduceMotion()
   // 页码跳转输入框的草稿值；页码因翻页/SSE 变化时同步回当前页
   const [pageInput, setPageInput] = useState(String(backendPage.page))
   useEffect(() => { setPageInput(String(backendPage.page)) }, [backendPage.page])
@@ -72,7 +70,7 @@ export default function TaskGrid() {
   const selectedIdSet = useMemo(() => new Set(selectedTaskIds), [selectedTaskIds])
   const taskOrderKey = useMemo(() => filteredTasks.map((task) => task.id).join('\0'), [filteredTasks])
 
-  // 筛选/网格重组时卡片平滑飞入新位置（系统减少动态效果模式下优雅降级）
+  // 筛选/网格重组时卡片平滑飞入新位置（减动效生效时优雅降级）
   useGridLayoutTransition(gridRef, animateLayout, taskOrderKey)
 
   // 稳定回调：TaskCard 已 memo，这里必须保证引用不变才能跳过无关卡片重渲染
