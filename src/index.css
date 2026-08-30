@@ -33,6 +33,13 @@ body {
   padding: 0;
   -webkit-user-select: none;
   user-select: none;
+  /* 允许双轴滚动、在合成器层禁掉页面捏合缩放，替代 document 上非 passive 的 touchmove 拦截（会阻塞快速滚动路径） */
+  touch-action: pan-x pan-y;
+}
+
+/* Lightbox 内的拖拽/捏合手势由自身 JS 处理，触摸起点在这里时不交给原生平移，避免背景页面跟着滚 */
+[data-lightbox-root] {
+  touch-action: pinch-zoom;
 }
 
 input,
