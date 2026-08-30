@@ -1,3 +1,22 @@
+# V3.4.0（2026-08-30）
+
+### 功能
+- 修复移动端页面滚动卡顿：原先为禁用双指缩放，在 `document` 上注册了非 passive 的 `touchmove` 监听（多指时 `preventDefault`），该写法会让 Chrome/iOS 关闭合成器线程驱动的快速滚动路径，每一帧滚动都要等主线程响应——主线程一旦被 React 渲染占着，滚动立刻掉帧，且与特效开关完全无关。
+- 页面级捏合缩放改由 CSS 在合成器层拦截：`body { touch-action: pan-x pan-y }` 允许双轴滚动、禁止捏合缩放，零 JS 成本，同时顺带禁用双击缩放。
+- Lightbox 内新增 `[data-lightbox-root] { touch-action: pinch-zoom }`：触摸起点在灯箱内时不交给原生平移，避免灯箱打开时背景页面跟着滚；灯箱图片的拖拽/捏合缩放仍由自身 JS 手势实现，行为不变。
+
+### 实现说明
+- `src/lib/viewport.ts` 移除 `document` 级 `touchmove` 拦截，保留 `gesturestart`/`gesturechange` 监听（iOS Safari 专属手势事件，不参与滚动路径），继续兜底拦截灯箱外的页面捏合手势。
+- `touch-action: pan-x pan-y` 与页面内既有局部手势规则取交集后行为不变：任务卡片的 `touch-pan-y`（横滑手势）、遮罩编辑器的 `touch-none`（画布手势）均不受影响；`Select`、`SettingsModal`、`usePreventBackgroundScroll` 中仅在弹层打开期间挂载的 `touchmove` 防背景滚动监听保持原样。
+- 无测试覆盖 `src/lib/viewport.ts`，改动以构建与全量测试通过验证。
+
+### 升级说明
+- 未修改 README、数据库结构、持久化字段或公开 API，升级无需迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（34 个测试文件，261 项测试）。
+
 # V3.3.0（2026-08-30）
 
 ### 功能
