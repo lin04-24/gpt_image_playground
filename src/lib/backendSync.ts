@@ -56,6 +56,9 @@ function scheduleSyncRetry() {
 }
 
 function setPageState(patch: Partial<BackendPageState>) {
+  // 字段无变化时跳过通知，避免频繁 SSE 同步反复翻转页面状态引发无意义重渲染
+  const changed = Object.entries(patch).some(([key, value]) => pageState[key as keyof BackendPageState] !== value)
+  if (!changed) return
   pageState = { ...pageState, ...patch }
   listeners.forEach((listener) => listener())
 }
@@ -103,14 +106,39 @@ function updateUrl(page: number) {
   if (filter.collectionId) query.set('collectionId', filter.collectionId)
   else query.delete('collectionId')
   const value = query.toString()
-  window.history.replaceState(null, '', `${window.location.pathname}${value ? `?${value}` : ''}${window.location.hash}`)
+  const next = `${window.location.pathname}${value ? `?${value}` : ''}${window.location.hash}`
+  // SSE 触发的同步 URL 不变，跳过 replaceState 以省掉主线程开销并规避浏览器频率限制
+  if (next === `${window.location.pathname}${window.location.search}${window.location.hash}`) return
+  window.history.replaceState(null, '', next)
+}
+
+// 递归比较两份 JSON 化数据，命中首个差异即返回；不产生序列化字符串，开销低于 JSON.stringify
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, idx) => jsonEqual(item, b[idx]))
+  }
+  const aRecord = a as Record<string, unknown>
+  const bRecord = b as Record<string, unknown>
+  // undefined 视为字段不存在，兼容对象上被显式置空的附加字段
+  const aKeys = Object.keys(aRecord).filter((key) => aRecord[key] !== undefined)
+  const bKeys = Object.keys(bRecord).filter((key) => bRecord[key] !== undefined)
+  if (aKeys.length !== bKeys.length) return false
+  return aKeys.every((key) => jsonEqual(aRecord[key], bRecord[key]))
+}
+
+// 任务内容是否一致；beamPhase 是前端专用字段，服务端返回不含它，比较时忽略
+function taskContentEqual(prev: TaskRecord, task: TaskRecord) {
+  return jsonEqual(prev.beamPhase === undefined ? prev : { ...prev, beamPhase: undefined }, task)
 }
 
 export async function synchronizeBackendData(page = pageState.page) {
   requestController?.abort()
   const controller = new AbortController()
   requestController = controller
-  setPageState({ page, loading: true, error: '' })
+  // 已完成首次同步后的后台刷新不再翻转 loading，避免翻页按钮随 SSE 事件反复禁用
+  setPageState({ page, loading: !pageState.initialized, error: '' })
   updateUrl(page)
   try {
     if (browserMigrationPromise) await browserMigrationPromise
@@ -120,19 +148,32 @@ export async function synchronizeBackendData(page = pageState.page) {
       await synchronizeBackendData(result.totalPages)
       return
     }
-    // 内容未变化的任务保留原对象引用，避免每次 SSE 事件都让整列表重渲染造成闪烁
+    // 内容未变化的任务保留原对象引用，让 TaskCard 的 memo 在 SSE 频繁推送时持续生效；
+    // 旧实现用 JSON.stringify 比较带 beamPhase 的任务永远失配，等于每个事件都换新对象
     const prevTasks = useStore.getState().tasks
     const prevById = new Map(prevTasks.map((task) => [task.id, task]))
-    const serverTasks = result.tasks.map((task) => {
+    const serverTasks: TaskRecord[] = []
+    const changedTasks: TaskRecord[] = []
+    for (const task of result.tasks) {
       const prev = prevById.get(task.id)
-      if (prev && JSON.stringify(prev) === JSON.stringify(task)) return prev
-      return prev?.beamPhase == null ? task : { ...task, beamPhase: prev.beamPhase }
-    })
+      if (prev && taskContentEqual(prev, task)) {
+        serverTasks.push(prev)
+        continue
+      }
+      // 内容有变化时保留流光相位，占位任务替换后动画不跳变
+      serverTasks.push(prev?.beamPhase == null ? task : { ...task, beamPhase: prev.beamPhase })
+      changedTasks.push(task)
+    }
     // 建单请求返回前，保留本地占位卡片，避免 SSE 触发的同步造成卡片闪退
     const tasks = mergePendingTasks(prevTasks, serverTasks)
-    useStore.setState({ tasks, selectedTaskIds: [] })
-    await Promise.all(serverTasks.map((task) => putTask(task)))
-    if (requestController !== controller) return
+    // 列表与上次完全一致时跳过 setState 与回写，进度类事件不再触发整网格重渲染
+    const unchanged = tasks.length === prevTasks.length && tasks.every((task, idx) => task === prevTasks[idx])
+    if (!unchanged) {
+      useStore.setState({ tasks, selectedTaskIds: [] })
+      // 只回写内容有变化的任务，避免每个事件都全量重写整页任务记录
+      if (changedTasks.length) await Promise.all(changedTasks.map((task) => putTask(task)))
+      if (requestController !== controller) return
+    }
     clearSyncRetry()
     setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '', initialized: true })
   } catch (error) {
