@@ -1,3 +1,20 @@
+# V3.4.3（2026-08-30）
+
+### 功能
+- 移除任务卡片常驻的 `will-change: transform`，改为仅在侧滑手势期间动态挂载：原先每张可见卡片（含收藏夹概览卡）都因常驻 will-change 各占一个独立合成层，几十张卡片同时可见时，手机端显存占用与合成器开销明显；而静止卡片并不需要层，常驻提升纯属为侧滑动画预付的成本。
+
+### 实现说明
+- 涉及 `TaskCard` 与 `FavoriteCollectionOverviewCard` 两处同款卡片：类名移除 `will-change-transform`；合成层生命周期由 `applySwipeOffset` 托管——位移非零时写 `style.willChange='transform'`，偏移归零即释放；`handleTouchStart` 按下时预提升一次，首次位移帧不必临时建层。
+- 所有手势结束路径（touchend、touchcancel、触摸起始即早退的分支）最终都会调用 `applySwipeOffset(0)`，释放逻辑天然覆盖，无需在各 handler 里重复清理；松手回弹的 transform 过渡即使 will-change 已清，浏览器也会对进行中的 transform 过渡自动提升合成层，回弹流畅度不受影响。
+- 列表滚动时最多只有被按住的一张卡临时占层；`MaskEditorModal` 画布的常驻 will-change 为单实例弹层，刻意保留。
+
+### 升级说明
+- 未修改 README、数据库结构、持久化字段或公开 API，升级无需迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（34 个测试文件，261 项测试）。
+
 # V3.4.2（2026-08-30）
 
 ### 功能
