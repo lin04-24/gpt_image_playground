@@ -1,3 +1,24 @@
+# V3.5.0（2026-08-31）
+
+### 功能
+- 修复后端模式下收藏夹的三个问题（均源于任务列表是「按当前筛选从服务端拉取的一页」，筛选切换与网络往返之间存在脏窗口）：
+  - 「全部」收藏夹照片短暂显示后直接消失：点进「全部」时前端把虚拟 ID `__all_favorites__` 当作真实收藏夹 ID 发给服务端查询，服务端按任务收藏列表匹配不到任何任务而返回空页。现虚拟「全部」映射为不带 collectionId 的查询（仅 `favorite=true`），且进入/退出「全部」完全不再触发重新同步，零闪烁。
+  - 进入收藏夹 A 先短暂显示 B 的照片再切换：切换筛选需等 250ms 防抖加网络往返，期间网格沿用上一筛选的旧任务列表。现收藏/收藏夹筛选变化时立即清空旧任务（保留生成中占位卡片）并立刻发起同步，不再走防抖；搜索词与状态筛选仍保持原防抖行为。
+  - 退出收藏夹回到总览瞬间各收藏夹封面乱串：同源问题，总览从旧筛选页派生封面。现切换瞬间列表即被清空，封面在新数据到达前显示占位图而非其他收藏夹的图片。
+
+### 实现说明
+- `currentFilter()` 将 `activeFavoriteCollectionId === ALL_FAVORITES_COLLECTION_ID` 映射为 `collectionId: undefined`；副作用是进出「全部」筛选键不变，订阅回调不再触发同步，`updateUrl` 也不会把虚拟 ID 写进 URL。
+- store 订阅回调改为逐字段比较筛选对象：`favorite`/`collectionId` 部分变化时立即清空 tasks（保留 `pending-` 占位卡）+ 置 `stale` + 立即 `synchronizeBackendData(1)`；`q`/`status` 变化维持原 250ms 防抖。清空 tasks 会同步重入订阅回调，故必须先更新 previousFilter 再写 store；顺带删除不再使用的 `filterKey()`。
+- `BackendPageState` 新增 `stale` 字段（同步完成/失败时清回 false，`stopBackendSync` 一并重置）；TaskGrid 空态分支在 `stale` 期间显示「正在加载任务...」而非闪现「没有找到匹配的任务」。
+- 新增 4 项 `backendSync` 回归测试：虚拟「全部」不下发 collectionId、进入收藏夹立即清空并走完 stale 生命周期、进出「全部」不触发重新同步、搜索词防抖窗口内不清空任务；测试用 store mock 升级为可触发订阅回调。
+
+### 升级说明
+- 未修改 README、数据库结构、持久化字段或公开 API，升级无需迁移操作。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（35 个测试文件，270 项测试）。
+
 # V3.4.4（2026-08-30）
 
 ### 功能
