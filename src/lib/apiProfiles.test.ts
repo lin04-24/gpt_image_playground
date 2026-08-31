@@ -7,6 +7,7 @@ import {
   DEFAULT_SETTINGS,
   createDefaultOpenAIProfile,
   createDefaultFalProfile,
+  groupApiProfilesByProvider,
   getActiveApiProfile,
   getGenerationApiProfile,
   findEquivalentApiProfile,
@@ -17,6 +18,40 @@ import {
   switchApiProfileProvider,
   validateApiProfile,
 } from './apiProfiles'
+
+describe('groupApiProfilesByProvider', () => {
+  it('groups profiles by provider while preserving profile order', () => {
+    const profiles = [
+      createDefaultOpenAIProfile({ id: 'openai-a', name: 'OpenAI A' }),
+      createDefaultFalProfile({ id: 'fal-a', name: 'fal A' }),
+      createDefaultOpenAIProfile({ id: 'openai-b', name: 'OpenAI B' }),
+      createDefaultOpenAIProfile({ id: 'custom-a', name: 'Custom A', provider: 'custom-one' }),
+      createDefaultOpenAIProfile({ id: 'custom-b', name: 'Custom B', provider: 'custom-one' }),
+    ]
+
+    expect(groupApiProfilesByProvider(profiles, ['openai', 'fal', 'custom-one'])).toEqual([
+      { provider: 'openai', profiles: [profiles[0], profiles[2]] },
+      { provider: 'fal', profiles: [profiles[1]] },
+      { provider: 'custom-one', profiles: [profiles[3], profiles[4]] },
+    ])
+  })
+
+  it('follows providerOrder and appends unknown providers', () => {
+    const profiles = [
+      createDefaultOpenAIProfile({ id: 'custom-a', provider: 'custom-a' }),
+      createDefaultFalProfile({ id: 'fal-a' }),
+      createDefaultOpenAIProfile({ id: 'custom-b', provider: 'custom-b' }),
+      createDefaultOpenAIProfile({ id: 'openai-a' }),
+    ]
+
+    expect(groupApiProfilesByProvider(profiles, ['openai', 'fal'])).toEqual([
+      { provider: 'openai', profiles: [profiles[3]] },
+      { provider: 'fal', profiles: [profiles[1]] },
+      { provider: 'custom-a', profiles: [profiles[0]] },
+      { provider: 'custom-b', profiles: [profiles[2]] },
+    ])
+  })
+})
 
 afterEach(() => {
   vi.unstubAllEnvs()

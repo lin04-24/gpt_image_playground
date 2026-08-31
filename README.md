@@ -1,3 +1,35 @@
+# V4.0.0 发布说明
+
+V4.0.0 将 API 配置管理升级为「API 配置档案」列表，版本标签为 `V4.0.0`。
+
+## 功能情况
+
+### API 配置档案列表化
+
+- 保留同一服务商拥有多个 Profile 的数据模型，不合并配置，不改变任务对 Profile ID 的引用方式。
+- 设置页常驻显示按服务商分组的 API 配置档案，分组顺序遵循 `providerOrder`，同组内保持原 Profile 顺序，未知服务商稳定追加到末尾。
+- 每个档案显示名称、服务商标识和模型摘要，并标记当前设置页编辑项。
+- 保留新建、复制、复制导入 URL、删除、点击切换编辑、拖拽排序和触摸排序；Profile 可跨服务商分组调整全局顺序，服务商分组标题不可拖拽。
+- 保留服务商类型切换，可在 OpenAI 兼容接口、fal.ai 和自定义服务商之间切换当前 Profile。
+
+### 生图配置独立选择
+
+- 生图入口统一使用「生图配置档案」术语。
+- `generationProfileId` 与 `generationModel` 继续独立决定下一次生图使用的 Profile 和模型；设置页切换当前编辑项不会意外改变生图默认选择。
+- 删除生图默认 Profile 时继续自动回退到剩余有效 Profile；历史任务复用和后端同步仍使用原 Profile ID。
+
+### 验证与兼容性
+
+- 新增 Profile 分组排序辅助逻辑及 Vitest 覆盖，验证同服务商归组、组内顺序、服务商排序和未知服务商追加规则。
+- 保持 `AppSettings`、Profile API、数据库结构、导入导出格式、云同步格式和任务记录字段不变。
+- 已通过 `npm run build` 和 `npm test -- --run`（35 个测试文件，273 项测试）。
+
+## 部署说明
+
+完整生图运行方式是 Docker Compose 后端部署。生产环境至少需要设置 `LOGIN_TOKEN`、`CONFIG_ENCRYPTION_KEY`、`POSTGRES_PASSWORD` 和 `APP_ORIGIN`，并备份 PostgreSQL 数据、图片卷及加密主密钥。
+
+---
+
 # V3.0.0 发布说明
 
 V3.0.0 为任务网格引入重排动画（Layout Transition），并增加「遵循系统减少动态效果」无障碍设置，版本标签为 `V3.0.0`，已发布至 [GitHub Releases](https://github.com/lin04-24/gpt_image_playground/releases/tag/V3.0.0)，并对应 `V3.0.0` 分支。

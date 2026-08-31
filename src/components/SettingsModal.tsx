@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { normalizeBaseUrl } from '../lib/api'
 import { fetchProviderModels } from '../lib/modelApi'
@@ -16,6 +16,7 @@ import {
   findEquivalentApiProfile,
   getApiProviderLabel,
   getActiveApiProfile,
+  groupApiProfilesByProvider,
   importCustomProviderSettingsFromJson,
   isDefaultConfigOnlyEnabled,
   isOpenAICompatibleProvider,
@@ -34,11 +35,10 @@ import {
 } from '../lib/settingsCustomProvider'
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
-import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
 import Select from './Select'
 import { Checkbox } from './Checkbox'
 import ViewportTooltip from './ViewportTooltip'
-import { ChevronDownIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon, GithubIcon, ExportIcon, ImportIcon, DragHandleIcon, LinkIcon } from './icons'
+import { CloseIcon, CopyIcon, PlusIcon, TrashIcon, GithubIcon, ExportIcon, ImportIcon, DragHandleIcon, LinkIcon } from './icons'
 import GeneralSettingsTab from './settings/GeneralSettingsTab'
 import CustomProviderModal from './settings/CustomProviderModal'
 import ProfileImportUrlModal, { type CopyImportUrlOptions } from './settings/ProfileImportUrlModal'
@@ -145,8 +145,6 @@ export default function SettingsModal() {
   const showToast = useStore((s) => s.showToast)
   const hasRunningOperations = useStore((s) => hasActiveDataOperations(s.tasks))
   const importInputRef = useRef<HTMLInputElement>(null)
-  const profileMenuRef = useRef<HTMLDivElement>(null)
-  const profileMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const dataTransferToastAtRef = useRef(0)
 
   const profileImportUrlTooltipTimerRef = useRef<number | null>(null)
@@ -160,11 +158,6 @@ export default function SettingsModal() {
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [showApiKey, setShowApiKey] = useState(false)
-  const [showProfileMenu, setShowProfileMenu] = useState(false)
-  // 关闭时菜单先播退出动画再卸载
-  const [profileMenuClosing, setProfileMenuClosing] = useState(false)
-  const profileMenuWasOpenRef = useRef(false)
-  const [profileMenuMaxHeight, setProfileMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
   const [showCustomProviderImport, setShowCustomProviderImport] = useState(false)
   const [showZipDownloadRouteManager, setShowZipDownloadRouteManager] = useState(false)
   const [editingCustomProviderId, setEditingCustomProviderId] = useState<string | null>(null)
@@ -215,6 +208,7 @@ export default function SettingsModal() {
   const apiProxyEnabled = apiProxyAvailable && activeProfileApiProxyEligible && apiProxyChecked
   const defaultProviderOrder = ['openai', 'fal', ...draft.customProviders.map(p => p.id)]
   const providerOrder = draft.providerOrder || defaultProviderOrder
+  const profileGroups = groupApiProfilesByProvider(draft.profiles, providerOrder)
 
   const unorderedProviderOptions = [
     { label: 'OpenAI 兼容接口', value: 'openai', draggable: true },
@@ -294,47 +288,6 @@ export default function SettingsModal() {
   useEffect(() => {
     if (showSettings && settingsTabRequest) setActiveTab(settingsTabRequest)
   }, [settingsTabRequest, showSettings])
-
-  const updateProfileMenuMaxHeight = useCallback(() => {
-    if (!profileMenuTriggerRef.current) return
-    setProfileMenuMaxHeight(getDropdownMaxHeight(profileMenuTriggerRef.current))
-  }, [])
-
-  useEffect(() => {
-    if (!showProfileMenu) return
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (profileMenuRef.current?.contains(event.target as Node)) return
-      setShowProfileMenu(false)
-    }
-
-    updateProfileMenuMaxHeight()
-    document.addEventListener('pointerdown', handlePointerDown)
-    window.addEventListener('resize', updateProfileMenuMaxHeight)
-    window.addEventListener('scroll', updateProfileMenuMaxHeight, true)
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
-      window.removeEventListener('resize', updateProfileMenuMaxHeight)
-      window.removeEventListener('scroll', updateProfileMenuMaxHeight, true)
-    }
-  }, [showProfileMenu, updateProfileMenuMaxHeight])
-
-  useEffect(() => {
-    if (defaultConfigOnly) setShowProfileMenu(false)
-  }, [defaultConfigOnly])
-
-  useEffect(() => {
-    if (showProfileMenu) {
-      profileMenuWasOpenRef.current = true
-      setProfileMenuClosing(false)
-      return
-    }
-    if (!profileMenuWasOpenRef.current) return
-    profileMenuWasOpenRef.current = false
-    setProfileMenuClosing(true)
-    const timer = setTimeout(() => setProfileMenuClosing(false), 200)
-    return () => clearTimeout(timer)
-  }, [showProfileMenu])
 
   useEffect(() => () => {
     if (profileImportUrlTooltipTimerRef.current != null) window.clearTimeout(profileImportUrlTooltipTimerRef.current)
@@ -494,7 +447,6 @@ export default function SettingsModal() {
   }
 
   const confirmCopyProfileImportUrl = (profile: ApiProfile) => {
-    setShowProfileMenu(false)
     setProfileImportUrlTooltipVisible(false)
     setCopyImportUrlProfile(profile)
     setCopyImportUrlOptions(readCopyImportUrlOptions())
@@ -693,7 +645,6 @@ export default function SettingsModal() {
           const nextDraft = normalizeSettings(useStore.getState().settings)
           setDraft(nextDraft)
           setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-          setShowProfileMenu(false)
         }
       } finally {
         setIsImportingData(false)
@@ -707,7 +658,6 @@ export default function SettingsModal() {
     const nextDraft = normalizeSettings(useStore.getState().settings)
     setDraft(nextDraft)
     setTimeoutInput(String(getActiveApiProfile(nextDraft).timeout))
-    setShowProfileMenu(false)
   }
 
   const createNewProfile = () => {
@@ -720,7 +670,6 @@ export default function SettingsModal() {
         activeProfileId: profile.id
     })
     commitSettings(nextDraft)
-    setShowProfileMenu(false)
   }
 
   const duplicateActiveProfile = () => {
@@ -738,7 +687,6 @@ export default function SettingsModal() {
       activeProfileId: profile.id,
     })
     commitSettings(nextDraft)
-    setShowProfileMenu(false)
   }
 
   const switchProfile = (id: string) => {
@@ -746,7 +694,6 @@ export default function SettingsModal() {
     setReusedTaskApiProfile(null)
     const nextDraft = normalizeSettings({ ...draft, activeProfileId: id })
     commitSettings(nextDraft)
-    setShowProfileMenu(false)
   }
   
   const handleProfileDragStart = (e: React.DragEvent, id: string) => {
@@ -792,11 +739,12 @@ export default function SettingsModal() {
   const moveProfileToDropTarget = (sourceId: string, targetId: string, position: 'before' | 'after' | null) => {
     if (!sourceId || sourceId === targetId) return
 
-    const sourceIndex = draft.profiles.findIndex((p) => p.id === sourceId)
-    const targetIndex = draft.profiles.findIndex((p) => p.id === targetId)
+    const displayedProfiles = profileGroups.flatMap((group) => group.profiles)
+    const sourceIndex = displayedProfiles.findIndex((p) => p.id === sourceId)
+    const targetIndex = displayedProfiles.findIndex((p) => p.id === targetId)
     if (sourceIndex < 0 || targetIndex < 0) return
 
-    const newProfiles = [...draft.profiles]
+    const newProfiles = [...displayedProfiles]
     const [removed] = newProfiles.splice(sourceIndex, 1)
 
     let newTargetIndex = targetIndex
@@ -1192,7 +1140,7 @@ export default function SettingsModal() {
               <div className="space-y-4">
                 <div>
                   <div className="mb-1.5 flex items-center gap-1.5">
-                    <span className="block text-sm text-gray-600 dark:text-gray-300">当前配置</span>
+                    <span className="block text-sm text-gray-600 dark:text-gray-300">API 配置档案</span>
                     <span className="relative inline-flex">
                       <button
                         type="button"
@@ -1246,55 +1194,29 @@ export default function SettingsModal() {
                       </ViewportTooltip>
                     </span>}
                   </div>
-                  <div ref={profileMenuRef} className="relative">
+                  <div className="mt-2 space-y-3">
                     <button
-                      ref={profileMenuTriggerRef}
                       type="button"
-                      onClick={() => {
-                        if (defaultConfigOnly) return
-                        if (!showProfileMenu) updateProfileMenuMaxHeight()
-                        setShowProfileMenu(!showProfileMenu)
-                      }}
+                      onClick={createNewProfile}
                       disabled={defaultConfigOnly}
-                      className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2 text-sm text-gray-700 outline-none transition dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 ${defaultConfigOnly ? 'cursor-not-allowed opacity-70' : 'hover:bg-gray-50 dark:hover:bg-white/[0.06]'}`}
-                      title={activeProfile.name}
+                      className="flex w-full items-center justify-between rounded-xl border border-dashed border-blue-200 px-3 py-2 text-left text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-500/30 dark:text-blue-400 dark:hover:bg-blue-500/10"
                     >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="min-w-0 truncate">{activeProfile.name}</span>
-                        <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-                          {getApiProviderLabel(draft, activeProfile.provider)}
-                        </span>
-                      </span>
-                      <ChevronDownIcon className={`w-3.5 h-3.5 flex-shrink-0 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${showProfileMenu ? 'rotate-180' : ''}`} />
+                      <span>创建新配置</span>
+                      <PlusIcon className="h-4 w-4" />
                     </button>
-                    
-                    {(showProfileMenu || profileMenuClosing) && !defaultConfigOnly && (
-                      <>
-                        <div
-                          className={`absolute right-0 top-full z-50 mt-1.5 w-full overflow-hidden overflow-y-auto rounded-xl border border-gray-200/60 bg-white/95 py-1 shadow-[0_8px_30px_rgb(0,0,0,0.12)] ring-1 ring-black/5 backdrop-blur-xl dark:border-white/[0.08] dark:bg-gray-900/95 dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] dark:ring-white/10 custom-scrollbar ${showProfileMenu ? 'animate-dropdown-down' : 'pointer-events-none animate-dropdown-down-out'}`}
-                          style={{ maxHeight: profileMenuMaxHeight }}
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              createNewProfile()
-                            }}
-                            className="select-menu-item flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
-                            style={{ '--stagger-i': 0 } as CSSProperties}
-                          >
-                            <span className="truncate font-semibold">创建新配置</span>
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-                              <PlusIcon className="h-4 w-4" />
-                            </span>
-                          </button>
-                          <div>
-                            {draft.profiles.map((profile, profileIdx) => (
+                    <div className="space-y-3">
+                      {profileGroups.map((group) => (
+                        <div key={group.provider}>
+                          <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            <span>{getApiProviderLabel(draft, group.provider)}</span>
+                            <span className="text-[10px] font-normal normal-case opacity-70">{group.provider}</span>
+                          </div>
+                          <div className="space-y-1">
+                            {group.profiles.map((profile) => (
                               <div
                                 key={profile.id}
                                 data-profile-id={profile.id}
-                                title={profile.name}
-                                style={{ '--stagger-i': Math.min(profileIdx + 1, 6) } as CSSProperties}
+                                title={`${profile.name} · ${profile.provider} · ${profile.model}`}
                                 draggable
                                 onDragStart={(e) => handleProfileDragStart(e, profile.id)}
                                 onDragOver={(e) => handleProfileDragOver(e, profile.id)}
@@ -1305,34 +1227,23 @@ export default function SettingsModal() {
                                 onTouchEnd={handleProfileTouchEnd}
                                 onTouchCancel={handleProfileDragEnd}
                                 onClick={(e) => {
-                                  // Don't switch profile if they are clicking the drag handle
                                   if ((e.target as HTMLElement).closest('[data-drag-handle]')) return
                                   e.preventDefault()
                                   switchProfile(profile.id)
                                 }}
-                                className={`select-menu-item relative group flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left text-xs transition-colors ${draggedProfileId === profile.id ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]' : profile.id === activeProfile.id ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'}`}
+                                className={`relative group flex w-full cursor-pointer items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition-colors ${draggedProfileId === profile.id ? 'opacity-40 bg-gray-100 dark:bg-white/[0.04]' : profile.id === activeProfile.id ? 'bg-blue-50 font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400' : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-white/[0.06]'}`}
                               >
-                                {dragOverProfileId === profile.id && dragDropPosition === 'before' && draggedProfileId !== profile.id && (
-                                  <div className="absolute -top-[1px] left-0 right-0 h-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
-                                )}
-                                {dragOverProfileId === profile.id && dragDropPosition === 'after' && draggedProfileId !== profile.id && (
-                                  <div className="absolute -bottom-[1px] left-0 right-0 h-[2px] bg-blue-500 rounded-full z-40 shadow-sm pointer-events-none" />
-                                )}
+                                {dragOverProfileId === profile.id && dragDropPosition === 'before' && draggedProfileId !== profile.id && <div className="absolute -top-[1px] left-0 right-0 h-[2px] rounded-full bg-blue-500" />}
+                                {dragOverProfileId === profile.id && dragDropPosition === 'after' && draggedProfileId !== profile.id && <div className="absolute -bottom-[1px] left-0 right-0 h-[2px] rounded-full bg-blue-500" />}
                                 <div className="flex min-w-0 flex-1 items-center gap-2 pr-2">
-                                  <div
-                                    data-drag-handle
-                                    className="flex cursor-grab active:cursor-grabbing items-center justify-center text-gray-400 opacity-60 transition-opacity hover:opacity-100 dark:text-gray-500"
-                                    style={{ touchAction: 'none' }}
-                                    title="拖拽排序"
-                                  >
+                                  <div data-drag-handle className="flex cursor-grab items-center justify-center text-gray-400 opacity-60 hover:opacity-100 dark:text-gray-500" style={{ touchAction: 'none' }} title="拖拽排序">
                                     <DragHandleIcon className="h-3.5 w-3.5" />
                                   </div>
                                   <span className="min-w-0 truncate">{profile.name}</span>
-                                  <span className={`rounded px-1.5 py-0.5 text-[10px] shrink-0 ${profile.id === activeProfile.id ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-white/[0.08] dark:text-gray-400'}`}>
-                                    {getApiProviderLabel(draft, profile.provider)}
-                                  </span>
+                                  <span className="min-w-0 max-w-[7rem] truncate text-[10px] text-gray-400 dark:text-gray-500">{profile.provider}</span>
+                                  <span className="min-w-0 max-w-[10rem] truncate text-[10px] text-gray-400 dark:text-gray-500">{profile.model}</span>
+                                  {profile.id === activeProfile.id && <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">当前编辑</span>}
                                 </div>
-                                
                                 <div className="flex shrink-0 items-center gap-1">
                                   <button
                                     type="button"
@@ -1341,7 +1252,7 @@ export default function SettingsModal() {
                                       e.stopPropagation()
                                       confirmCopyProfileImportUrl(profile)
                                     }}
-                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 opacity-60 transition-all hover:bg-gray-100 hover:text-gray-600 hover:opacity-100 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
+                                    className="flex h-5 w-5 items-center justify-center rounded text-gray-400 opacity-60 hover:bg-gray-100 hover:text-gray-600 hover:opacity-100 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
                                     aria-label={`复制导入配置「${profile.name}」的 URL`}
                                     title="复制导入 URL"
                                   >
@@ -1356,10 +1267,10 @@ export default function SettingsModal() {
                                         setConfirmDialog({
                                           title: '删除配置',
                                           message: `确定要删除配置「${profile.name}」吗？`,
-                                          action: () => deleteProfile(profile.id)
+                                          action: () => deleteProfile(profile.id),
                                         })
                                       }}
-                                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 opacity-60 transition-all hover:bg-red-50 hover:text-red-500 hover:opacity-100 dark:hover:bg-red-500/10"
+                                      className="flex h-5 w-5 items-center justify-center rounded text-gray-400 opacity-60 hover:bg-red-50 hover:text-red-500 hover:opacity-100 dark:hover:bg-red-500/10"
                                       aria-label="删除配置"
                                     >
                                       <TrashIcon className="h-3.5 w-3.5" />
@@ -1370,8 +1281,8 @@ export default function SettingsModal() {
                             ))}
                           </div>
                         </div>
-                      </>
-                    )}
+                      ))}
+                    </div>
                   </div>
                 </div>
 

@@ -90,6 +90,41 @@ function normalizeProviderOrder(value: unknown, customProviders: CustomProviderD
   return [...ordered, ...providerIds.filter((id) => !ordered.includes(id))]
 }
 
+export interface ApiProfileGroup {
+  provider: ApiProvider
+  profiles: ApiProfile[]
+}
+
+/** 按服务商分组并按配置顺序排列 Profile；组内顺序保持原数组顺序。 */
+export function groupApiProfilesByProvider(profiles: ApiProfile[], providerOrder: string[] = []): ApiProfileGroup[] {
+  const grouped = new Map<ApiProvider, ApiProfile[]>()
+  profiles.forEach((profile) => {
+    const current = grouped.get(profile.provider)
+    if (current) {
+      current.push(profile)
+      return
+    }
+    grouped.set(profile.provider, [profile])
+  })
+
+  const order = new Map<string, number>()
+  providerOrder.forEach((provider, index) => {
+    if (!order.has(provider)) order.set(provider, index)
+  })
+
+  return Array.from(grouped.entries())
+    .map(([provider, groupedProfiles], index) => ({ provider, profiles: groupedProfiles, index }))
+    .sort((a, b) => {
+      const aOrder = order.get(String(a.provider))
+      const bOrder = order.get(String(b.provider))
+      if (aOrder != null && bOrder != null) return aOrder - bOrder
+      if (aOrder != null) return -1
+      if (bOrder != null) return 1
+      return a.index - b.index
+    })
+    .map(({ provider, profiles: groupedProfiles }) => ({ provider, profiles: groupedProfiles }))
+}
+
 function isCustomProviderTemplate(value: unknown): value is CustomProviderTemplate {
   return value === 'http-image'
 }

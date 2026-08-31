@@ -1382,7 +1382,7 @@ export default function InputBar() {
 
   const renderGenerationSelector = () => generationChoices.length > 0 ? (
     <div className="flex min-w-0 items-center gap-2">
-      <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">生图配置</span>
+      <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">生图配置档案</span>
       <Select
         value={selectedGenerationChoice?.value ?? generationChoices[0].value}
         onChange={(value) => {
@@ -1403,7 +1403,7 @@ export default function InputBar() {
   const showTaskBatchBar = !showFavoriteCollectionBatchBar && selectedTaskIds.length > 0
 
   const pillSummary = [
-    selectedGenerationChoice?.label ?? '未选择生图配置',
+    selectedGenerationChoice?.label ?? '未选择生图配置档案',
     displaySize,
     `×${params.n}`,
     batchCount > 1 ? `批次 ${batchCount}` : null,
