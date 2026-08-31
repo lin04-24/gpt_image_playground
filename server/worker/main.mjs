@@ -9,12 +9,15 @@ import { transitionTaskInTransaction } from '../repositories/tasks.mjs'
 import { getConfigEncryptionKey } from '../security/configCrypto.mjs'
 import { generateImages } from './providers/images.mjs'
 import { removeKeyedBackground } from '../storage/transparentImage.mjs'
+import { sweepOrphanFiles } from './orphanSweep.mjs'
 
 getConfigEncryptionKey()
 const database = createDatabase()
 await migrateDatabase(database)
 const redisPair = await createRedisPair()
 const storage = createImageStorage()
+const ORPHAN_SWEEP_GRACE_MS = Number(process.env.ORPHAN_SWEEP_GRACE_HOURS || 24) * 60 * 60 * 1000
+const ORPHAN_SWEEP_INTERVAL_MS = Number(process.env.ORPHAN_SWEEP_INTERVAL_HOURS || 24) * 60 * 60 * 1000
 const INPUT_MEMORY_BUDGET = Number(process.env.WORKER_INPUT_MEMORY_BUDGET_BYTES || 512 * 1024 * 1024)
 const INPUT_PIXEL_BUDGET = Number(process.env.WORKER_INPUT_PIXEL_BUDGET || 200_000_000)
 let activeInputBytes = 0
@@ -233,3 +236,18 @@ const recover = async () => {
 await recover()
 setInterval(recover, 30_000)
 await worker.start()
+
+// 文件落盘与 images 插入不在同一事务,中间失败留下的无行文件,file_cleanup(DB 驱动)发现不了,
+// 需按磁盘清单与数据库比对清理;宽限期内不删,避免误删并发去重(EEXIST 收养)下被共享的路径
+const sweepOrphans = async () => {
+  try {
+    const stats = await sweepOrphanFiles({ database, storage, graceMs: ORPHAN_SWEEP_GRACE_MS })
+    if (stats.removedImages || stats.removedThumbnails || stats.removedTemp || stats.missingImages || stats.missingThumbnails) {
+      console.warn('孤儿文件清理:', JSON.stringify(stats))
+    }
+  } catch (error) {
+    console.error('孤儿文件清理失败:', error)
+  }
+}
+void sweepOrphans()
+setInterval(sweepOrphans, ORPHAN_SWEEP_INTERVAL_MS)
