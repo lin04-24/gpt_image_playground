@@ -420,12 +420,37 @@ export async function buildApp({ database, redis, storage = createImageStorage()
   fastify.put('/api/tasks/:id/favorites', async (request, reply) => {
     if (!await requireOperationalWrite(request, reply)) return
     const id = request.params.id
-    const collections = Array.isArray(request.body?.collectionIds) ? request.body.collectionIds.map(String) : []
-    await database.transaction(async (client) => {
-      await client.query('DELETE FROM task_favorite_collections WHERE task_id = $1', [id])
-      for (const collectionId of collections) await client.query('INSERT INTO task_favorite_collections (task_id, collection_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, collectionId])
-      await client.query('UPDATE app_meta SET task_list_revision = task_list_revision + 1, updated_at = now() WHERE id = 1')
-    })
+    const rawIds = Array.isArray(request.body?.collectionIds) ? request.body.collectionIds : []
+    // 收藏夹 ID 形态与数量先做硬限制，避免恶意载荷进入逐行写入
+    if (rawIds.length > 100 || rawIds.some((cid) => typeof cid !== 'string' || !cid.trim() || cid.length > 128)) {
+      return reply.code(400).send(errorPayload('FAVORITE_PAYLOAD_INVALID', '收藏参数无效'))
+    }
+    const collections = [...new Set(rawIds)]
+    try {
+      await database.transaction(async (client) => {
+        // 事务内批量校验任务与收藏夹存在性，避免逐条插入触发外键异常变成非结构化 500
+        const task = await client.query('SELECT id FROM tasks WHERE id = $1', [id])
+        if (!task.rowCount) throw Object.assign(new Error('任务不存在'), { code: 'FAVORITE_TASK_NOT_FOUND' })
+        if (collections.length) {
+          const found = await client.query('SELECT id FROM favorite_collections WHERE id = ANY($1::text[])', [collections])
+          const foundIds = new Set(found.rows.map((row) => row.id))
+          const missing = collections.filter((cid) => !foundIds.has(cid))
+          if (missing.length) throw Object.assign(new Error('收藏夹不存在'), { code: 'FAVORITE_COLLECTION_NOT_FOUND', missing })
+        }
+        await client.query('DELETE FROM task_favorite_collections WHERE task_id = $1', [id])
+        if (collections.length) {
+          await client.query('INSERT INTO task_favorite_collections (task_id, collection_id) SELECT $1, cid FROM unnest($2::text[]) AS cid ON CONFLICT DO NOTHING', [id, collections])
+        }
+        await client.query('UPDATE app_meta SET task_list_revision = task_list_revision + 1, updated_at = now() WHERE id = 1')
+      })
+    } catch (error) {
+      if (error?.code === 'FAVORITE_TASK_NOT_FOUND') return reply.code(404).send(errorPayload('TASK_NOT_FOUND', '任务不存在'))
+      if (error?.code === 'FAVORITE_COLLECTION_NOT_FOUND') return reply.code(404).send(errorPayload('COLLECTION_NOT_FOUND', '收藏夹不存在', { collectionIds: error.missing || [] }))
+      // 校验与写入之间收藏夹/任务被并发删除时的兜底，把外键异常转成明确的 404
+      // 约束名形如 task_favorite_collections_task_id_fkey / ..._collection_id_fkey，按列名区分
+      if (error?.code === '23503') return reply.code(404).send(errorPayload(String(error.constraint || '').endsWith('_task_id_fkey') ? 'TASK_NOT_FOUND' : 'COLLECTION_NOT_FOUND', '任务或收藏夹已被删除'))
+      throw error
+    }
     await emit('favorite.updated', id, { taskId: id, collectionIds: collections })
     return { taskId: id, collectionIds: collections, isFavorite: collections.length > 0 }
   })
