@@ -1,5 +1,16 @@
 # GPT Image Playground
 
+## V4.1.1 功能情况
+
+V4.1.1 修复 Worker 过期租约恢复时忽略最大尝试次数的问题，版本标签为 `V4.1.1`。
+
+- 过期租约恢复现在按 `attempt_count < max_attempts` 分流，未超限作业才会重新排队。
+- 达到最大尝试次数的作业原子地标记为 `error`，不再因 Worker 持续崩溃而无限重跑。
+- 达到上限的 generation task 同步标记失败，并发布 `task.failed` 事件；可重试作业继续通过 outbox 发布 `job.enqueue`。
+- 新增 Worker 租约恢复回归测试，覆盖重新入队和达到上限失败两条路径。
+
+验证：`npm run build`、`npm test -- --run`（34 个测试文件，258 项测试）和 `git diff --check` 均已通过。
+
 ## V4.1.0 功能情况
 
 V4.1.0 将生产运行时统一收敛到 Fastify + PostgreSQL + Redis API/Worker，版本标签为 `V4.1.0`。

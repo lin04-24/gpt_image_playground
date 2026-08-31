@@ -3,6 +3,7 @@ import { acknowledgeJob, claimJob } from '../redis/queue.mjs'
 import { redisKeys } from '../redis/keys.mjs'
 
 const RETRYABLE = new Set(['network', 'timeout', 'rate_limit', 'server', 'io'])
+const EXPIRED_LEASE_ERROR = '任务租约已过期，已达到最大尝试次数'
 
 export function classifyJobError(error) {
   const status = Number(error?.status || error?.statusCode)
@@ -174,8 +175,28 @@ export async function renewLease(database, jobId, workerId, leaseSeconds = Numbe
 
 export async function recoverExpiredLeases(database, redis) {
   const rows = await database.transaction(async (client) => {
-    const result = await client.query(`UPDATE jobs SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, available_at = now() WHERE status = 'processing' AND lease_expires_at < now() RETURNING id, kind, task_id, target_id`)
-    for (const job of result.rows) await client.query(`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('job.enqueue', 'job', $1, $2::jsonb)`, [job.id, JSON.stringify({ jobId: job.id, kind: job.kind, targetId: job.task_id || job.target_id })])
+    const result = await client.query(`UPDATE jobs
+      SET status = CASE WHEN attempt_count < max_attempts THEN 'queued' ELSE 'error' END,
+          last_error = CASE WHEN attempt_count < max_attempts THEN last_error ELSE $1 END,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          available_at = now(),
+          updated_at = now()
+      WHERE status = 'processing' AND lease_expires_at < now()
+      RETURNING id, kind, task_id, target_id, status`, [EXPIRED_LEASE_ERROR])
+    for (const job of result.rows) {
+      if (job.status === 'queued') {
+        await client.query(`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('job.enqueue', 'job', $1, $2::jsonb)`, [job.id, JSON.stringify({ jobId: job.id, kind: job.kind, targetId: job.task_id || job.target_id })])
+        continue
+      }
+      if (job.task_id && job.kind === 'generation') {
+        const task = await client.query(`UPDATE tasks SET status = 'error', error = $2, updated_at = now(), finished_at = now(), version = version + 1 WHERE id = $1 AND status IN ('queued', 'running') RETURNING version`, [job.task_id, EXPIRED_LEASE_ERROR])
+        if (task.rowCount) {
+          await client.query('UPDATE app_meta SET task_list_revision = task_list_revision + 1, updated_at = now() WHERE id = 1')
+          await client.query(`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('task.failed', 'task', $1, $2::jsonb)`, [job.task_id, JSON.stringify({ taskId: job.task_id, version: task.rows[0].version, error: EXPIRED_LEASE_ERROR })])
+        }
+      }
+    }
     return result
   })
   for (const job of rows.rows) {
