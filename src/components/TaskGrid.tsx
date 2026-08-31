@@ -335,7 +335,7 @@ export default function TaskGrid() {
   if (!filteredTasks.length) {
     return (
       <div className="text-center py-20 text-gray-400 dark:text-gray-500">
-        {backendEnabled && !backendPage.initialized ? <p className="text-sm">正在加载任务...</p> : backendEnabled && backendPage.error ? <p className="text-sm text-red-500">{backendPage.error}</p> : searchQuery || filterFavorite ? (
+        {backendEnabled && (!backendPage.initialized || backendPage.stale) ? <p className="text-sm">正在加载任务...</p> : backendEnabled && backendPage.error ? <p className="text-sm text-red-500">{backendPage.error}</p> : searchQuery || filterFavorite ? (
           <p className="text-sm">没有找到匹配的任务</p>
         ) : (
           <>

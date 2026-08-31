@@ -1,6 +1,7 @@
 import type { AppSettings, InputDraft, TaskRecord } from '../types'
 import { blobToDataUrl } from './dataUrl'
 import { CURRENT_THUMBNAIL_VERSION, getAllImageIds, getAllTasks, getImage, getImageDataUrl, putTask } from './db'
+import { ALL_FAVORITES_COLLECTION_ID } from './favoriteState'
 import { clearImageCaches, deleteImageCacheEntry, ensureImageCached, ensureImageThumbnailCached, setRemoteImageLoader, setRemoteImageThumbnailLoader } from './imageCache'
 import { isEmptyInputDraft, normalizeInputDraft, restoreGalleryInputDraftState } from './inputDraftState'
 import { BACKEND_PAGE_SIZE, backendImageUrl, finalizeBackendBrowserMigration, getBackendAppState, getBackendFavoriteCollections, getBackendMigrationStatus, getBackendProfiles, getBackendTasks, migrateBackendBrowserImage, migrateBackendBrowserManifest, migrateBackendBrowserTasks, putBackendAppState, subscribeBackendEvents, uploadBackendImage, upsertBackendProfile } from './backendApi'
@@ -26,13 +27,15 @@ export interface BackendPageState {
   error: string
   /** 是否已完成首次同步；完成前不渲染本地缓存任务，避免闪现 IndexedDB 里的全量旧数据 */
   initialized: boolean
+  /** 收藏/收藏夹筛选刚切换、新列表尚未到达；此时任务列表已被清空，视图应显示加载中而不是空态 */
+  stale: boolean
 }
 
 const initialPage = typeof window === 'undefined'
   ? 1
   : Math.max(1, Math.trunc(Number(new URLSearchParams(window.location.search).get('page'))) || 1)
 const backendModeEnabled = import.meta.env.VITE_BACKEND_API === 'true'
-let pageState: BackendPageState = { page: initialPage, pageSize: BACKEND_PAGE_SIZE, totalTasks: 0, totalPages: 0, loading: backendModeEnabled, error: '', initialized: false }
+let pageState: BackendPageState = { page: initialPage, pageSize: BACKEND_PAGE_SIZE, totalTasks: 0, totalPages: 0, loading: backendModeEnabled, error: '', initialized: false, stale: false }
 
 // 同步失败后的自动重试间隔（毫秒），覆盖容器重建/服务重启期间的接口不可用窗口
 const RETRY_DELAYS = [2000, 4000, 8000, 15000, 30000]
@@ -84,12 +87,9 @@ function currentFilter() {
     q: state.searchQuery,
     status: state.filterStatus,
     favorite: state.filterFavorite || undefined,
-    collectionId: state.activeFavoriteCollectionId || undefined,
+    // “全部”是前端虚拟收藏夹，发给服务端会因匹配不到任何任务的收藏列表而返回空页
+    collectionId: state.activeFavoriteCollectionId === ALL_FAVORITES_COLLECTION_ID ? undefined : state.activeFavoriteCollectionId || undefined,
   }
-}
-
-function filterKey() {
-  return JSON.stringify(currentFilter())
 }
 
 function updateUrl(page: number) {
@@ -175,11 +175,11 @@ export async function synchronizeBackendData(page = pageState.page) {
       if (requestController !== controller) return
     }
     clearSyncRetry()
-    setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '', initialized: true })
+    setPageState({ page: result.page, pageSize: result.pageSize, totalTasks: result.totalTasks, totalPages: result.totalPages, loading: false, error: '', initialized: true, stale: false })
   } catch (error) {
     if (controller.signal.aborted || requestController !== controller) return
     const firstAttempt = !pageState.initialized
-    setPageState({ loading: false, error: error instanceof Error ? error.message : '读取任务失败', initialized: true })
+    setPageState({ loading: false, error: error instanceof Error ? error.message : '读取任务失败', initialized: true, stale: false })
     // 首次同步失败时清掉本地缓存，防止把 IndexedDB 里的全量旧历史当作当前列表展示
     if (firstAttempt) useStore.setState({ tasks: [], selectedTaskIds: [] })
     // 容器重建等场景下接口可能暂时不可用；不自动重试的话列表会一直为空，直到手动切换筛选才触发重新同步
@@ -339,11 +339,20 @@ export function startBackendSync() {
       if (shouldSeed) void pushBackendAppState().catch((error) => console.warn('Backend app state seed failed:', error))
     }
   })()
-  let previousFilter = filterKey()
+  let previousFilter = currentFilter()
   stopStore = useStore.subscribe(() => {
-    const nextFilter = filterKey()
-    if (nextFilter === previousFilter) return
+    const nextFilter = currentFilter()
+    if (nextFilter.q === previousFilter.q && nextFilter.status === previousFilter.status && nextFilter.favorite === previousFilter.favorite && nextFilter.collectionId === previousFilter.collectionId) return
+    // 先记录新筛选再写 store，下面清空 tasks 会同步重入本回调
+    const collectionChanged = nextFilter.favorite !== previousFilter.favorite || nextFilter.collectionId !== previousFilter.collectionId
     previousFilter = nextFilter
+    if (collectionChanged) {
+      // 收藏/收藏夹切换是离散动作：立即清空上一筛选的任务并同步，避免旧列表在新收藏夹下短暂串显
+      useStore.setState({ tasks: useStore.getState().tasks.filter((task) => task.id.startsWith('pending-')) })
+      setPageState({ stale: true })
+      void synchronizeBackendData(1)
+      return
+    }
     if (filterTimer) window.clearTimeout(filterTimer)
     filterTimer = window.setTimeout(() => void synchronizeBackendData(1), 250)
   })
@@ -396,7 +405,7 @@ export function stopBackendSync() {
   appStateTimer = null
   if (shouldFlushAppState) void pushBackendAppState().catch((error) => console.warn('Backend app state flush failed:', error))
   hydratingState = false
-  setPageState({ loading: backendModeEnabled, error: '', initialized: false })
+  setPageState({ loading: backendModeEnabled, error: '', initialized: false, stale: false })
   setRemoteImageLoader(undefined)
   setRemoteImageThumbnailLoader(undefined)
 }

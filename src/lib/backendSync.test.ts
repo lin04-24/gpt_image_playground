@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { DEFAULT_PARAMS, type TaskRecord } from '../types'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const db = vi.hoisted(() => ({
   CURRENT_THUMBNAIL_VERSION: 2,
@@ -40,15 +40,29 @@ const backendApi = vi.hoisted(() => ({
 
 const store = vi.hoisted(() => {
   let state: Record<string, unknown> = {}
+  const listeners = new Set<() => void>()
   return {
     reset: () => {
-      state = { tasks: [], searchQuery: '', filterStatus: 'all', filterFavorite: false, activeFavoriteCollectionId: null }
+      state = {
+        tasks: [],
+        searchQuery: '',
+        filterStatus: 'all',
+        filterFavorite: false,
+        activeFavoriteCollectionId: null,
+        setFavoriteCollections: vi.fn(),
+        setDefaultFavoriteCollectionId: vi.fn(),
+      }
+      listeners.clear()
     },
     getState: vi.fn(() => state),
     setState: vi.fn((patch: Record<string, unknown>) => {
       state = { ...state, ...patch }
+      listeners.forEach((listener) => listener())
     }),
-    subscribe: vi.fn(() => () => {}),
+    subscribe: vi.fn((listener: () => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    }),
   }
 })
 
@@ -63,7 +77,8 @@ vi.mock('./inputDraftState', () => ({
 }))
 vi.mock('../store', () => ({ useStore: store }))
 
-import { synchronizeBackendData } from './backendSync'
+import { ALL_FAVORITES_COLLECTION_ID } from './favoriteState'
+import { getBackendPageState, startBackendSync, stopBackendSync, synchronizeBackendData } from './backendSync'
 
 const makeTask = (overrides: Partial<TaskRecord> = {}): TaskRecord => ({
   id: 'task-1',
@@ -160,5 +175,75 @@ describe('synchronizeBackendData 合并', () => {
     expect(tasks[0]).toBe(pending)
     expect(db.putTask).toHaveBeenCalledTimes(1)
     expect(db.putTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-9' }))
+  })
+})
+
+describe('收藏夹筛选同步', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    store.reset()
+  })
+
+  afterEach(() => {
+    stopBackendSync()
+  })
+
+  it('虚拟“全部”收藏夹不作为 collectionId 发送给服务端', async () => {
+    store.setState({ filterFavorite: true, activeFavoriteCollectionId: ALL_FAVORITES_COLLECTION_ID })
+    backendApi.getBackendTasks.mockResolvedValue(serverResult([]))
+
+    await synchronizeBackendData()
+
+    expect(backendApi.getBackendTasks).toHaveBeenCalledWith(expect.objectContaining({ favorite: true, collectionId: undefined }))
+  })
+
+  it('进入收藏夹立即清空旧列表并同步，完成后恢复数据并清除 stale', async () => {
+    backendApi.getBackendTasks.mockResolvedValue(serverResult([makeTask({ id: 'task-a' })]))
+    startBackendSync()
+
+    store.setState({ filterFavorite: true, activeFavoriteCollectionId: 'col-a', tasks: [makeTask({ id: 'stale-task', outputImages: ['img'] })] })
+
+    // 订阅回调同步清空了上一筛选的任务，只剩占位卡片
+    expect(storeTasks()).toEqual([])
+    expect(getBackendPageState().stale).toBe(true)
+
+    await vi.waitFor(() => expect(getBackendPageState().stale).toBe(false))
+    expect(backendApi.getBackendTasks).toHaveBeenCalledWith(expect.objectContaining({ favorite: true, collectionId: 'col-a' }))
+    expect(storeTasks().map((task) => task.id)).toEqual(['task-a'])
+  })
+
+  it('进入/退出虚拟“全部”收藏夹不触发重新同步，也不清空任务', async () => {
+    backendApi.getBackendTasks.mockResolvedValue(serverResult([makeTask({ id: 'task-a' })]))
+    startBackendSync()
+
+    // 进入收藏夹总览会触发一次同步
+    store.setState({ filterFavorite: true, tasks: [makeTask({ id: 'task-a' })] })
+    await vi.waitFor(() => expect(backendApi.getBackendTasks).toHaveBeenCalledTimes(1))
+
+    store.setState({ activeFavoriteCollectionId: ALL_FAVORITES_COLLECTION_ID })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(backendApi.getBackendTasks).toHaveBeenCalledTimes(1)
+    expect(getBackendPageState().stale).toBe(false)
+    expect(storeTasks().map((task) => task.id)).toEqual(['task-a'])
+  })
+
+  it('仅搜索词变化时按防抖同步，等待期间不清空任务', async () => {
+    vi.useFakeTimers()
+    try {
+      backendApi.getBackendTasks.mockResolvedValue(serverResult([makeTask({ id: 'task-a' })]))
+      startBackendSync()
+      const existing = makeTask({ id: 'task-a', outputImages: ['img'] })
+      store.setState({ tasks: [existing] })
+
+      store.setState({ searchQuery: 'cat' })
+      expect(storeTasks()).toEqual([existing])
+      expect(backendApi.getBackendTasks).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(backendApi.getBackendTasks).toHaveBeenCalledWith(expect.objectContaining({ q: 'cat' }))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
