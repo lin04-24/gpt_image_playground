@@ -35,15 +35,18 @@ async function request(path: string, init: RequestInit = {}) {
   if (csrf && method !== 'GET' && method !== 'HEAD') headers.set('X-CSRF-Token', csrf)
   const response = await fetch(path, { ...init, headers, credentials: 'include' })
   if (!response.ok) {
+    let body: unknown
     let message = `请求失败 (${response.status})`
     try {
-      const body = await response.json() as { error?: { message?: string } | string }
-      message = typeof body.error === 'string' ? body.error : body.error?.message || message
+      body = await response.json()
+      const errorBody = body as { error?: { message?: string } | string }
+      message = typeof errorBody.error === 'string' ? errorBody.error : errorBody.error?.message || message
     } catch {
       // 忽略非 JSON 错误响应
     }
     const error = new Error(message)
-    Object.assign(error, { status: response.status })
+    // data 携带服务端错误详情（如 409 冲突时的当前状态），供上层做合并处理
+    Object.assign(error, { status: response.status, data: body })
     throw error
   }
   return response
@@ -208,17 +211,27 @@ export interface BackendAppState {
   settings?: Record<string, unknown>
   galleryDraft?: Record<string, unknown>
   updatedAt?: string
+  /** 服务端单行状态的乐观锁版本；0/缺省表示旧部署或尚未写入过 */
+  version?: number
 }
 
 export async function getBackendAppState(): Promise<BackendAppState | null> {
   const response = await request('/api/app-state')
-  const row = await response.json() as { settings?: unknown; gallery_draft?: unknown; updated_at?: string } | null
+  const row = await response.json() as { settings?: unknown; gallery_draft?: unknown; updated_at?: string; version?: number } | null
   if (!row) return null
-  return { settings: (row.settings || undefined) as Record<string, unknown> | undefined, galleryDraft: (row.gallery_draft || undefined) as Record<string, unknown> | undefined, updatedAt: row.updated_at }
+  return { settings: (row.settings || undefined) as Record<string, unknown> | undefined, galleryDraft: (row.gallery_draft || undefined) as Record<string, unknown> | undefined, updatedAt: row.updated_at, version: Number(row.version || 0) }
 }
 
-export async function putBackendAppState(input: { settings?: unknown; galleryDraft?: unknown }) {
-  await request('/api/app-state', { method: 'PUT', body: JSON.stringify(input) })
+export async function putBackendAppState(input: { settings?: unknown; galleryDraft?: unknown; version?: number }) {
+  const response = await request('/api/app-state', { method: 'PUT', body: JSON.stringify(input) })
+  return response.json() as Promise<{ ok: boolean; version: number }>
+}
+
+/** 409 冲突响应中携带的服务端当前状态 */
+export interface BackendAppStateConflict {
+  settings?: Record<string, unknown>
+  galleryDraft?: unknown
+  version: number
 }
 
 export function backendImageUrl(id: string, thumbnail = false) {

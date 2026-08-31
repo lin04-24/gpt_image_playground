@@ -4,7 +4,7 @@ import { CURRENT_THUMBNAIL_VERSION, getAllImageIds, getAllTasks, getImage, getIm
 import { ALL_FAVORITES_COLLECTION_ID } from './favoriteState'
 import { clearImageCaches, deleteImageCacheEntry, ensureImageCached, ensureImageThumbnailCached, setRemoteImageLoader, setRemoteImageThumbnailLoader } from './imageCache'
 import { isEmptyInputDraft, normalizeInputDraft, restoreGalleryInputDraftState } from './inputDraftState'
-import { BACKEND_PAGE_SIZE, backendImageUrl, finalizeBackendBrowserMigration, getBackendAppState, getBackendFavoriteCollections, getBackendMigrationStatus, getBackendProfiles, getBackendTasks, migrateBackendBrowserImage, migrateBackendBrowserManifest, migrateBackendBrowserTasks, putBackendAppState, subscribeBackendEvents, uploadBackendImage, upsertBackendProfile } from './backendApi'
+import { BACKEND_PAGE_SIZE, backendImageUrl, finalizeBackendBrowserMigration, getBackendAppState, getBackendFavoriteCollections, getBackendMigrationStatus, getBackendProfiles, getBackendTasks, migrateBackendBrowserImage, migrateBackendBrowserManifest, migrateBackendBrowserTasks, putBackendAppState, subscribeBackendEvents, uploadBackendImage, upsertBackendProfile, type BackendAppStateConflict } from './backendApi'
 import { useStore } from '../store'
 
 let stopEvents: (() => void) | null = null
@@ -17,6 +17,12 @@ let hydratingProfiles = false
 let hydratingState = false
 let browserMigrationPromise: Promise<unknown> | null = null
 const listeners = new Set<() => void>()
+// 应用状态乐观锁：appStateVersion 是最后见到的服务端版本，syncedAppStateSettings 是该版本的内容基准，
+// 冲突时用"本地 vs 基准"的字段差异去叠加服务端最新值，避免整包互相覆盖
+let appStateVersion = 0
+let syncedAppStateSettings: Record<string, unknown> | null = null
+let appStatePushChain: Promise<void> = Promise.resolve()
+let mergingAppState = false
 
 export interface BackendPageState {
   page: number
@@ -212,9 +218,59 @@ function appStateSnapshot() {
   return { settings: state.settings, galleryInputDraft: state.galleryInputDraft }
 }
 
-async function pushBackendAppState() {
-  const state = useStore.getState()
-  await putBackendAppState({ settings: state.settings, galleryDraft: await backendGalleryDraftPayload(state.galleryInputDraft) })
+// profiles 走 /api/profiles 通道同步且含敏感字段（服务端会 redact 变形），
+// 不进应用状态载荷，避免 redact 后的副本在冲突合并时反向覆盖本地配置
+function appStateSettingsPayload(settings: object): Record<string, unknown> {
+  const payload = { ...settings } as Record<string, unknown>
+  delete payload.profiles
+  return payload
+}
+
+// 服务端最新值为基础，叠加本地相对基准改动的字段；无基准（如 seed 前冲突）时整包以本地为准
+function mergeAppStateSettings(basis: Record<string, unknown> | null, serverSettings: Record<string, unknown>, localSettings: object) {
+  const merged = appStateSettingsPayload(serverSettings)
+  if (!basis) return appStateSettingsPayload(localSettings)
+  for (const [key, value] of Object.entries(appStateSettingsPayload(localSettings))) {
+    if (jsonEqual(basis[key], value)) continue
+    merged[key] = value
+  }
+  return merged
+}
+
+function pushBackendAppState() {
+  // 串行化推送，避免防抖推送与停止时的 flush 并发乱序；重试在链条内解决 409
+  const run = appStatePushChain.catch(() => undefined).then(async () => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const state = useStore.getState()
+      const settings = appStateSettingsPayload(state.settings)
+      const galleryDraft = await backendGalleryDraftPayload(state.galleryInputDraft)
+      try {
+        const result = await putBackendAppState({ settings, galleryDraft, version: appStateVersion > 0 ? appStateVersion : undefined })
+        // 旧部署可能不返回 version，此时保留当前值，退化为无条件覆盖
+        if (result.version > 0) appStateVersion = result.version
+        syncedAppStateSettings = settings
+        return
+      } catch (error) {
+        const conflict = error as { status?: number; data?: { error?: { details?: { current?: BackendAppStateConflict } } } }
+        const current = conflict.data?.error?.details?.current
+        if (conflict.status !== 409 || !current || attempt === 2) throw error
+        const basis = syncedAppStateSettings
+        appStateVersion = current.version
+        syncedAppStateSettings = current.settings || {}
+        const merged = mergeAppStateSettings(basis, current.settings || {}, state.settings)
+        // 合并期间订阅只更新快照不排新推送，重试循环下一轮会带上合并结果
+        mergingAppState = true
+        try {
+          if (!jsonEqual(merged, settings)) useStore.getState().setSettings(merged as Partial<AppSettings>)
+          if (current.galleryDraft) applyRemoteGalleryDraft(current.galleryDraft)
+        } finally {
+          mergingAppState = false
+        }
+      }
+    }
+  })
+  appStatePushChain = run
+  return run
 }
 
 function applyRemoteGalleryDraft(value: unknown) {
@@ -296,6 +352,8 @@ export function startBackendSync() {
     let shouldSeed = false
     try {
       const remote = await getBackendAppState()
+      appStateVersion = remote?.version || 0
+      syncedAppStateSettings = remote?.settings || null
       if (!remote) {
         shouldSeed = true
       } else if (remote.settings && Object.keys(remote.settings).length) {
@@ -373,9 +431,11 @@ export function startBackendSync() {
     const next = JSON.stringify(appStateSnapshot())
     if (next === previousAppState) return
     previousAppState = next
-    if (hydratingState) return
+    // 合并期间（hydratingState / mergingAppState）只跟踪快照，不排新推送
+    if (hydratingState || mergingAppState) return
     if (appStateTimer) window.clearTimeout(appStateTimer)
     appStateTimer = window.setTimeout(() => {
+      appStateTimer = null
       void pushBackendAppState().catch((error) => console.warn('Backend app state update failed:', error))
     }, 800)
   })

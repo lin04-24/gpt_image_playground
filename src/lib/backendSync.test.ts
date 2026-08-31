@@ -24,7 +24,7 @@ const backendApi = vi.hoisted(() => ({
   BACKEND_PAGE_SIZE: 50,
   backendImageUrl: vi.fn((id: string) => `/api/images/${id}`),
   finalizeBackendBrowserMigration: vi.fn(async () => ({})),
-  getBackendAppState: vi.fn(async () => null),
+  getBackendAppState: vi.fn(),
   getBackendFavoriteCollections: vi.fn(async () => []),
   getBackendMigrationStatus: vi.fn(async () => ({ enabled: false })),
   getBackendProfiles: vi.fn(async () => []),
@@ -242,6 +242,57 @@ describe('收藏夹筛选同步', () => {
 
       await vi.advanceTimersByTimeAsync(250)
       expect(backendApi.getBackendTasks).toHaveBeenCalledWith(expect.objectContaining({ q: 'cat' }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('应用状态乐观锁冲突合并', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    store.reset()
+  })
+
+  afterEach(() => {
+    stopBackendSync()
+  })
+
+  it('推送遇 409 时按字段合并服务端状态并以新版本重推', async () => {
+    vi.useFakeTimers()
+    try {
+      const setSettings = vi.fn((patch: Record<string, unknown>) => {
+        const current = (store.getState().settings || {}) as Record<string, unknown>
+        store.setState({ settings: { ...current, ...patch } })
+      })
+      backendApi.getBackendAppState.mockResolvedValueOnce({ settings: { theme: 'light' }, version: 5 })
+      // 第一次推送撞上另一客户端的写入（theme 改为 dark，版本推进到 6），409 携带服务端当前状态
+      backendApi.putBackendAppState
+        .mockRejectedValueOnce(Object.assign(new Error('应用状态已被其他客户端修改'), {
+          status: 409,
+          data: { error: { code: 'APP_STATE_CONFLICT', details: { current: { settings: { theme: 'dark', quality: 'low' }, galleryDraft: {}, version: 6 } } } },
+        }))
+        .mockResolvedValueOnce({ ok: true, version: 7 })
+      store.setState({ settings: { theme: 'light', quality: 'low', profiles: [] }, setSettings })
+      startBackendSync()
+      await vi.advanceTimersByTimeAsync(0)
+
+      // 本地修改 quality，触发防抖推送
+      const settings = store.getState().settings as Record<string, unknown>
+      store.setState({ settings: { ...settings, quality: 'medium' } })
+      await vi.advanceTimersByTimeAsync(800)
+      await vi.advanceTimersByTimeAsync(100)
+
+      expect(backendApi.putBackendAppState).toHaveBeenCalledTimes(2)
+      expect(backendApi.putBackendAppState).toHaveBeenNthCalledWith(1, expect.objectContaining({ settings: { theme: 'light', quality: 'medium' }, version: 5 }))
+      // theme 本地未改动 → 采纳服务端 dark；quality 是本地改动 → 保留本地值
+      expect(backendApi.putBackendAppState).toHaveBeenNthCalledWith(2, expect.objectContaining({ settings: { theme: 'dark', quality: 'medium' }, version: 6 }))
+      expect(setSettings).toHaveBeenCalledWith({ theme: 'dark', quality: 'medium' })
+      expect(store.getState().settings).toEqual({ theme: 'dark', quality: 'medium', profiles: [] })
+
+      // 合并落库不应再排多余的推送
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(backendApi.putBackendAppState).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }

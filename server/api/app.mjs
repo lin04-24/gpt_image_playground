@@ -440,32 +440,55 @@ export async function buildApp({ database, redis, storage = createImageStorage()
     const body = request.body || {}
     const settings = redactJson(body.settings || {})
     const galleryDraft = redactJson(body.galleryDraft || {})
-    await database.transaction(async (client) => {
-      await client.query(`INSERT INTO app_state (id, settings, gallery_draft, updated_at) VALUES (1,$1,$2,now()) ON CONFLICT (id) DO UPDATE SET settings = excluded.settings, gallery_draft = excluded.gallery_draft, updated_at = now()`, [JSON.stringify(settings), JSON.stringify(galleryDraft)])
-      await client.query('DELETE FROM draft_images WHERE draft_key = $1', ['gallery'])
-      const inputImages = Array.isArray(galleryDraft?.inputImages) ? galleryDraft.inputImages : []
-      const imageIds = [
-        ...inputImages.map((image) => image?.id),
-        galleryDraft?.maskDraft?.targetImageId,
-        galleryDraft?.maskDraft?.maskImageId,
-      ].filter((id) => typeof id === 'string' && isSafeImageId(id))
-      const existingImages = imageIds.length ? await client.query('SELECT id FROM images WHERE id = ANY($1::text[])', [imageIds]) : { rows: [] }
-      const existingImageIds = new Set(existingImages.rows.map((row) => row.id))
-      for (let position = 0; position < inputImages.length; position += 1) {
-        const imageId = inputImages[position]?.id
-        if (typeof imageId !== 'string' || !existingImageIds.has(imageId)) continue
-        await client.query(`INSERT INTO draft_images (draft_key, image_id, role, position) VALUES ('gallery', $1, 'input', $2) ON CONFLICT DO NOTHING`, [imageId, position])
-      }
-      const targetImageId = galleryDraft?.maskDraft?.targetImageId
-      if (typeof targetImageId === 'string' && existingImageIds.has(targetImageId)) {
-        await client.query(`INSERT INTO draft_images (draft_key, image_id, role, position) VALUES ('gallery', $1, 'mask_target', 0) ON CONFLICT DO NOTHING`, [targetImageId])
-      }
-      const maskImageId = galleryDraft?.maskDraft?.maskImageId
-      if (typeof maskImageId === 'string' && existingImageIds.has(maskImageId)) {
-        await client.query(`INSERT INTO draft_images (draft_key, image_id, role, position) VALUES ('gallery', $1, 'mask', 0) ON CONFLICT DO NOTHING`, [maskImageId])
-      }
-    })
-    return { ok: true }
+    // 乐观锁：客户端带上它最后见到的 version，条件更新失败说明有其他客户端先写入；
+    // 缺少 version 视为旧客户端（或首次 seed），退回无条件覆盖保持兼容
+    const expectedVersion = Number.isInteger(body.version) ? body.version : null
+    try {
+      const version = await database.transaction(async (client) => {
+        let saved = { rowCount: 0, rows: [] }
+        if (expectedVersion != null) {
+          saved = await client.query('UPDATE app_state SET settings = $1, gallery_draft = $2, version = version + 1, updated_at = now() WHERE id = 1 AND version = $3 RETURNING version', [JSON.stringify(settings), JSON.stringify(galleryDraft), expectedVersion])
+          if (!saved.rowCount) {
+            const existing = await client.query('SELECT version FROM app_state WHERE id = 1')
+            if (existing.rowCount) throw Object.assign(new Error('应用状态已被其他客户端修改'), { code: 'APP_STATE_CONFLICT' })
+          }
+        }
+        if (!saved.rowCount) {
+          saved = expectedVersion == null
+            ? await client.query(`INSERT INTO app_state (id, settings, gallery_draft, version, updated_at) VALUES (1,$1,$2,1,now()) ON CONFLICT (id) DO UPDATE SET settings = excluded.settings, gallery_draft = excluded.gallery_draft, version = app_state.version + 1, updated_at = now() RETURNING version`, [JSON.stringify(settings), JSON.stringify(galleryDraft)])
+            : await client.query(`INSERT INTO app_state (id, settings, gallery_draft, version, updated_at) VALUES (1,$1,$2,1,now()) RETURNING version`, [JSON.stringify(settings), JSON.stringify(galleryDraft)])
+        }
+        await client.query('DELETE FROM draft_images WHERE draft_key = $1', ['gallery'])
+        const inputImages = Array.isArray(galleryDraft?.inputImages) ? galleryDraft.inputImages : []
+        const imageIds = [
+          ...inputImages.map((image) => image?.id),
+          galleryDraft?.maskDraft?.targetImageId,
+          galleryDraft?.maskDraft?.maskImageId,
+        ].filter((id) => typeof id === 'string' && isSafeImageId(id))
+        const existingImages = imageIds.length ? await client.query('SELECT id FROM images WHERE id = ANY($1::text[])', [imageIds]) : { rows: [] }
+        const existingImageIds = new Set(existingImages.rows.map((row) => row.id))
+        for (let position = 0; position < inputImages.length; position += 1) {
+          const imageId = inputImages[position]?.id
+          if (typeof imageId !== 'string' || !existingImageIds.has(imageId)) continue
+          await client.query(`INSERT INTO draft_images (draft_key, image_id, role, position) VALUES ('gallery', $1, 'input', $2) ON CONFLICT DO NOTHING`, [imageId, position])
+        }
+        const targetImageId = galleryDraft?.maskDraft?.targetImageId
+        if (typeof targetImageId === 'string' && existingImageIds.has(targetImageId)) {
+          await client.query(`INSERT INTO draft_images (draft_key, image_id, role, position) VALUES ('gallery', $1, 'mask_target', 0) ON CONFLICT DO NOTHING`, [targetImageId])
+        }
+        const maskImageId = galleryDraft?.maskDraft?.maskImageId
+        if (typeof maskImageId === 'string' && existingImageIds.has(maskImageId)) {
+          await client.query(`INSERT INTO draft_images (draft_key, image_id, role, position) VALUES ('gallery', $1, 'mask', 0) ON CONFLICT DO NOTHING`, [maskImageId])
+        }
+        return Number(saved.rows[0].version)
+      })
+      return { ok: true, version }
+    } catch (error) {
+      if (error?.code !== 'APP_STATE_CONFLICT') throw error
+      const current = await database.query('SELECT settings, gallery_draft, version FROM app_state WHERE id = 1')
+      const row = current.rows[0]
+      return reply.code(409).send(errorPayload('APP_STATE_CONFLICT', '应用状态已被其他客户端修改', { current: { settings: row?.settings || {}, galleryDraft: row?.gallery_draft || {}, version: Number(row?.version || 0) } }))
+    }
   })
 
   fastify.get('/api/events', async (request, reply) => {
