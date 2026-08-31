@@ -144,6 +144,24 @@ describe('imageCache', () => {
     expect(db.getStoredFreshImageThumbnail).toHaveBeenCalledWith('cleared')
   })
 
+  it('keeps thumbnail subscribers when an entry is invalidated', async () => {
+    const onThumbnail = vi.fn()
+    subscribeImageThumbnail('invalidated', onThumbnail)
+
+    deleteImageCacheEntry('invalidated')
+    await storeAndPublishImageThumbnail({
+      id: 'invalidated',
+      thumbnailDataUrl: 'data:image/webp;base64,refreshed',
+      thumbnailVersion: db.CURRENT_THUMBNAIL_VERSION,
+    })
+
+    expect(onThumbnail).toHaveBeenCalledWith({
+      dataUrl: 'data:image/webp;base64,refreshed',
+      width: undefined,
+      height: undefined,
+    })
+  })
+
   it('loads a missing image remotely and persists it in IndexedDB', async () => {
     const loadRemote = vi.fn().mockResolvedValue({
       id: 'remote-image',

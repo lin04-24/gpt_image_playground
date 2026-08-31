@@ -238,7 +238,6 @@ export function deleteImageCacheEntry(id: string) {
   thumbnailBackfillIds.delete(id)
   thumbnailBackfillRunningIds.delete(id)
   thumbnailBackfillFailureCounts.delete(id)
-  thumbnailSubscribers.delete(id)
 }
 
 export function clearImageCaches() {
