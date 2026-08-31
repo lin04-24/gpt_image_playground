@@ -1,3 +1,32 @@
+# GPT Image Playground
+
+## V4.1.0 功能情况
+
+V4.1.0 将生产运行时统一收敛到 Fastify + PostgreSQL + Redis API/Worker，版本标签为 `V4.1.0`。
+
+- 前端认证、任务、图片、Profile、收藏夹、应用状态、SSE 和浏览器迁移统一使用 `/api/*` 接口。
+- 移除旧 Node 22 + SQLite 快照服务、`cloud-api` 协议、分页快照实现和旧 SQLite 迁移命令。
+- 任务创建、重试、删除和收藏操作固定走后端 API，由独立 Worker 执行供应商任务。
+- Docker 默认入口改为 `node server/api/main.mjs`，Compose 明确分离 API、Worker、PostgreSQL 和 Redis。
+- 新增认证路由回归测试，更新后端 API/同步测试，并保留浏览器 IndexedDB 到 PostgreSQL 的迁移流程。
+- 旧 SQLite 数据不会自动升级；切换前需由部署方自行备份和处理旧数据库及图片目录。
+
+验证：`npm run build`、`npm test`（34 个测试文件，257 项测试）和 `docker compose config` 均已通过。
+
+## 生产运行方式
+
+生产环境统一使用 Fastify + PostgreSQL + Redis API/Worker。前端只调用同源 `/api/*` 接口，API 与 Worker 由 `deploy/cloud/docker-compose.yml` 启动并共享图片卷；单独的静态构建仅用于需要后端配套的前端产物。
+
+```sh
+cd deploy/cloud
+cp .env.example .env
+docker compose up -d --build
+```
+
+请在 `.env` 中设置 `LOGIN_TOKEN`、`CONFIG_ENCRYPTION_KEY`、`POSTGRES_PASSWORD` 和 `APP_ORIGIN`。正式接口包括 `/api/auth/*`、`/api/tasks/*`、`/api/images/*`、`/api/profiles/*`、`/api/app-state`、`/api/events` 和 `/api/migration/*`。
+
+这是一次有意的兼容性断裂：仓库不再提供旧 Node/SQLite 快照服务、旧快照协议或旧 SQLite 迁移命令。升级前必须由部署方自行备份并处理旧 SQLite 数据、图片目录及浏览器缓存；浏览器缓存可通过 `/api/migration/browser/*` 补充导入 PostgreSQL。切换前请使用 `docker compose config` 检查 API/Worker 命令和依赖关系。
+
 # V4.0.0 发布说明
 
 V4.0.0 将 API 配置管理升级为「API 配置档案」列表，版本标签为 `V4.0.0`。

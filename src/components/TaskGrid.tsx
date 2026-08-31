@@ -36,7 +36,7 @@ export default function TaskGrid() {
   const startedOnCard = useRef(false)
   const startedWithCtrl = useRef(false)
   const initialSelection = useRef<string[]>([])
-  const backendEnabled = import.meta.env.VITE_BACKEND_API === 'true'
+  const backendEnabled = true
   const backendPage = useSyncExternalStore(subscribeBackendPage, getBackendPageState, getBackendPageState)
   const animateLayout = !useReduceMotion()
   // 页码跳转输入框的草稿值；页码因翻页/SSE 变化时同步回当前页

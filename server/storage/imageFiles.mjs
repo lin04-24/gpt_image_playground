@@ -19,7 +19,7 @@ export function thumbnailRelativePath(id) {
   return `thumbnails/${id.slice(0, 2)}/${id.slice(2, 4)}/${id}.webp`
 }
 
-export function createImageStorage(root = process.env.IMAGE_DATA_DIR || process.env.DATA_DIR || './data') {
+export function createImageStorage(root = process.env.IMAGE_DATA_DIR || './data') {
   const dataRoot = resolve(root)
   const tempRoot = join(dataRoot, 'tmp')
   const absolute = (relative) => resolve(dataRoot, relative)

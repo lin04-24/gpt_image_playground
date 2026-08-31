@@ -34,7 +34,7 @@ export interface BackendPageState {
 const initialPage = typeof window === 'undefined'
   ? 1
   : Math.max(1, Math.trunc(Number(new URLSearchParams(window.location.search).get('page'))) || 1)
-const backendModeEnabled = import.meta.env.VITE_BACKEND_API === 'true'
+const backendModeEnabled = true
 let pageState: BackendPageState = { page: initialPage, pageSize: BACKEND_PAGE_SIZE, totalTasks: 0, totalPages: 0, loading: backendModeEnabled, error: '', initialized: false, stale: false }
 
 // 同步失败后的自动重试间隔（毫秒），覆盖容器重建/服务重启期间的接口不可用窗口

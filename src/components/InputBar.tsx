@@ -390,7 +390,7 @@ export default function InputBar() {
       ? settings
       : normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
   ), [activeProfile.id, settingsActiveProfile.id, settings])
-  const hasSubmitApiConfig = Boolean(activeProfile.apiKey || (import.meta.env.VITE_BACKEND_API === 'true' && activeProfile.apiKeyConfigured))
+  const hasSubmitApiConfig = Boolean(activeProfile.apiKey || activeProfile.apiKeyConfigured)
   const canSubmit = Boolean(prompt.trim() && hasSubmitApiConfig)
   const submitButtonAriaLabel = hasSubmitApiConfig
     ? maskDraft ? '遮罩编辑' : '生成图像'

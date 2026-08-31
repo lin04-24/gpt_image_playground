@@ -15,15 +15,13 @@ export interface PersistedAppState {
   supportPromptDismissed: boolean
   supportPromptOpen: boolean
   supportPromptSkippedForImportedData: boolean
-  cloudDataClearedAt: number
 }
 
-type PersistedStateSource = Omit<PersistedAppState, 'prompt' | 'inputImages' | 'cloudDataClearedAt'> & {
+type PersistedStateSource = Omit<PersistedAppState, 'prompt' | 'inputImages'> & {
   prompt: string
   inputImages: InputImage[]
   maskDraft: MaskDraft | null
   maskEditorImageId: string | null
-  cloudDataClearedAt?: number
 }
 
 type PersistedStateFallback = Pick<
@@ -70,13 +68,11 @@ function normalizeParams(value: unknown, fallback: TaskParams): TaskParams {
 
 export function createPersistedState(state: PersistedStateSource): PersistedAppState {
   const normalizedSettings = normalizeSettings(state.settings)
-  const settings = import.meta.env.VITE_BACKEND_API === 'true'
-    ? {
-        ...normalizedSettings,
-        apiKey: '',
-        profiles: normalizedSettings.profiles.map((profile) => ({ ...profile, apiKey: '' })),
-      }
-    : normalizedSettings
+  const settings = {
+    ...normalizedSettings,
+    apiKey: '',
+    profiles: normalizedSettings.profiles.map((profile) => ({ ...profile, apiKey: '' })),
+  }
   const galleryInputDraft = saveGalleryInputDraft(state)
   return {
     settings,
@@ -104,7 +100,6 @@ export function createPersistedState(state: PersistedStateSource): PersistedAppS
     supportPromptDismissed: state.supportPromptDismissed,
     supportPromptOpen: state.supportPromptOpen,
     supportPromptSkippedForImportedData: state.supportPromptSkippedForImportedData,
-    cloudDataClearedAt: state.cloudDataClearedAt ?? 0,
   }
 }
 
@@ -147,9 +142,6 @@ export function normalizePersistedState(
       supportPromptDismissed: Boolean(persistedState.supportPromptDismissed),
       supportPromptOpen: Boolean(persistedState.supportPromptOpen),
       supportPromptSkippedForImportedData: Boolean(persistedState.supportPromptSkippedForImportedData),
-      cloudDataClearedAt: typeof persistedState.cloudDataClearedAt === 'number' && Number.isFinite(persistedState.cloudDataClearedAt)
-        ? persistedState.cloudDataClearedAt
-        : 0,
       prompt: draft?.prompt ?? '',
       inputImages: draft?.inputImages ?? [],
       maskDraft: draft?.maskDraft ?? null,

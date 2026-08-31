@@ -45,7 +45,7 @@ function validHttpUrl(value) {
   }
 }
 
-export async function buildApp({ database, redis, storage = createImageStorage(), loginToken = process.env.LOGIN_TOKEN || process.env.SYNC_PASSWORD || '', appOrigin = process.env.APP_ORIGIN || '', staticRoot = process.env.STATIC_DIR || '' }) {
+export async function buildApp({ database, redis, storage = createImageStorage(), loginToken = process.env.LOGIN_TOKEN || '', appOrigin = process.env.APP_ORIGIN || '', staticRoot = process.env.STATIC_DIR || '' }) {
   if (!database || !redis) throw new Error('database and redis are required')
   if (!loginToken) throw new Error('LOGIN_TOKEN is required')
   const fastify = (await import('fastify')).default({ logger: process.env.NODE_ENV !== 'test' })
@@ -197,25 +197,6 @@ export async function buildApp({ database, redis, storage = createImageStorage()
     reply.clearCookie('gip_session', { path: '/' })
     return { authenticated: false }
   })
-  // 迁移期保留旧客户端的会话路径；业务数据已由 /api 接管。
-  fastify.get('/cloud-api/session', async (request, reply) => {
-    const current = await session(request)
-    if (current?.unavailable) return reply.code(503).send(errorPayload('SESSION_UNAVAILABLE', '会话服务暂时不可用'))
-    // 与 /api/auth/session 一致，返回 csrfToken 供旧路径前端恢复
-    return current ? { authenticated: true, csrfToken: current.csrf } : { authenticated: false }
-  })
-  fastify.post('/cloud-api/login', async (request, reply) => fastify.inject({ method: 'POST', url: '/api/auth/login', payload: request.body }).then((response) => {
-    reply.code(response.statusCode)
-    for (const [key, value] of Object.entries(response.headers)) reply.header(key, value)
-    return response.json()
-  }))
-  fastify.post('/cloud-api/logout', async (request, reply) => {
-    const token = request.cookies.gip_session
-    if (token) await redis.del(redisKeys.session(sha256(token)))
-    reply.clearCookie('gip_session', { path: '/' })
-    return { authenticated: false }
-  })
-
   fastify.get('/api/tasks', async (request, reply) => {
     if (!await requireAuth(request, reply)) return
     const query = request.query || {}

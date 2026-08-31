@@ -44,7 +44,7 @@ function SearchActionButton({
 }
 
 export default function SearchBar() {
-  const backendEnabled = import.meta.env.VITE_BACKEND_API === 'true'
+  const backendEnabled = true
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const searchQuery = useStore((s) => s.searchQuery)

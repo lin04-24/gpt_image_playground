@@ -22,30 +22,34 @@ import ImageContextMenu from './components/ImageContextMenu'
 import SupportPromptModal from './components/SupportPromptModal'
 import { FavoriteCollectionPickerModal, FavoriteCollectionsView, ManageCollectionsModal } from './components/FavoriteCollections'
 import { useGlobalClickSuppression } from './lib/clickSuppression'
-import CloudSyncGate from './components/CloudSyncGate'
-import { getCloudSessionStatus, loginCloudSync, type CloudSessionStatus } from './lib/cloudSync'
+import BackendSyncGate from './components/BackendSyncGate'
+import { getBackendSession, loginBackend } from './lib/backendApi'
 
 let customProviderConfigUrlImportStarted = false
 
 export default function App() {
-  const [sessionStatus, setSessionStatus] = useState<CloudSessionStatus | 'checking'>('checking')
+  const [sessionStatus, setSessionStatus] = useState<'authenticated' | 'login-required' | 'unavailable' | 'checking'>('checking')
   const [sessionError, setSessionError] = useState('')
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [password, setPassword] = useState('')
 
   useEffect(() => {
     let active = true
-    void getCloudSessionStatus().then((status) => {
-      if (!active) return
-      setSessionStatus(status)
-    })
+    void getBackendSession()
+      .then((status) => {
+        if (!active) return
+        setSessionStatus(status.authenticated ? 'authenticated' : 'login-required')
+      })
+      .catch(() => {
+        if (active) setSessionStatus('unavailable')
+      })
     return () => {
       active = false
     }
   }, [])
 
-  if (sessionStatus === 'checking') return <CloudLoginPage message="正在检查登录状态..." />
-  if (sessionStatus === 'unavailable') return <CloudLoginPage message="暂时无法验证工作区访问权限，请检查服务连接后刷新页面重试。" />
+  if (sessionStatus === 'checking') return <BackendLoginPage message="正在检查登录状态..." />
+  if (sessionStatus === 'unavailable') return <BackendLoginPage message="暂时无法验证工作区访问权限，请检查服务连接后刷新页面重试。" />
   if (sessionStatus === 'login-required') {
     const submit = async (event: React.FormEvent) => {
       event.preventDefault()
@@ -53,7 +57,7 @@ export default function App() {
       setIsLoggingIn(true)
       setSessionError('')
       try {
-        await loginCloudSync(password)
+        await loginBackend(password)
         setPassword('')
         setSessionStatus('authenticated')
       } catch (error) {
@@ -62,13 +66,13 @@ export default function App() {
         setIsLoggingIn(false)
       }
     }
-    return <CloudLoginPage password={password} onPasswordChange={setPassword} onSubmit={submit} error={sessionError} isLoggingIn={isLoggingIn} />
+    return <BackendLoginPage password={password} onPasswordChange={setPassword} onSubmit={submit} error={sessionError} isLoggingIn={isLoggingIn} />
   }
 
-  return <WorkspaceApp cloudEnabled={sessionStatus === 'authenticated'} />
+  return <WorkspaceApp />
 }
 
-interface CloudLoginPageProps {
+interface BackendLoginPageProps {
   message?: string
   password?: string
   onPasswordChange?: (value: string) => void
@@ -77,7 +81,7 @@ interface CloudLoginPageProps {
   isLoggingIn?: boolean
 }
 
-function CloudLoginPage({ message, password = '', onPasswordChange, onSubmit, error = '', isLoggingIn = false }: CloudLoginPageProps) {
+function BackendLoginPage({ message, password = '', onPasswordChange, onSubmit, error = '', isLoggingIn = false }: BackendLoginPageProps) {
   return (
     <main className="safe-area-top safe-area-bottom min-h-screen bg-gray-50 px-4 py-8 text-gray-900 dark:bg-gray-950 dark:text-gray-100 sm:flex sm:items-center sm:justify-center sm:px-6">
       <section className="mx-auto flex w-full max-w-md flex-col justify-center rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-900 sm:p-8">
@@ -111,7 +115,7 @@ function CloudLoginPage({ message, password = '', onPasswordChange, onSubmit, er
   )
 }
 
-function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
+function WorkspaceApp() {
   const setSettings = useStore((s) => s.setSettings)
   const reduceMotion = useReduceMotion()
   const filterFavorite = useStore((s) => s.filterFavorite)
@@ -168,7 +172,7 @@ function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
             clearAppliedUrlSettings()
           })
 
-        void initStore({ deferImageCleanup: cloudEnabled }).finally(() => {
+        void initStore().finally(() => {
           if (active) setLocalReady(true)
         })
         return
@@ -193,14 +197,14 @@ function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
           })
       }
 
-      void initStore({ deferImageCleanup: cloudEnabled }).finally(() => {
+      void initStore().finally(() => {
         if (active) setLocalReady(true)
       })
     })
     return () => {
       active = false
     }
-  }, [cloudEnabled, setSettings])
+  }, [setSettings])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {
@@ -234,7 +238,7 @@ function WorkspaceApp({ cloudEnabled }: { cloudEnabled: boolean }) {
       <Toast />
       <MaskEditorModal />
       <ImageContextMenu />
-      <CloudSyncGate localReady={localReady} enabled={cloudEnabled} />
+      <BackendSyncGate localReady={localReady} />
     </>
   )
 }

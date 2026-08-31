@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createBackendTask, upsertBackendProfile } from './backendApi'
+import { createBackendTask, getBackendSession, loginBackend, upsertBackendProfile } from './backendApi'
 
 const profile = {
   id: 'profile-a',
@@ -71,6 +71,25 @@ describe('backend profile synchronization', () => {
       'POST /api/profiles',
       'GET 2',
       'POST /api/profiles',
+    ])
+  })
+})
+
+describe('backend authentication endpoints', () => {
+  it('uses only the formal /api/auth paths', async () => {
+    const calls: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const path = String(input)
+      calls.push(`${init?.method || 'GET'} ${path}`)
+      return new Response(JSON.stringify({ authenticated: true }), { status: 200 })
+    })
+
+    await getBackendSession()
+    await loginBackend('token')
+
+    expect(calls).toEqual([
+      'GET /api/auth/session',
+      'POST /api/auth/login',
     ])
   })
 })

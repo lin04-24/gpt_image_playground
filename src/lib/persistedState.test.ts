@@ -43,7 +43,6 @@ function source(overrides: Record<string, unknown> = {}) {
     supportPromptDismissed: false,
     supportPromptOpen: false,
     supportPromptSkippedForImportedData: false,
-    cloudDataClearedAt: 0,
     ...overrides,
   }
 }

@@ -53,20 +53,20 @@ export async function getBackendSession(): Promise<BackendSession> {
   const response = await request('/api/auth/session')
   const result = await response.json() as BackendSession
   // 重开浏览器后 sessionStorage 已清空但会话 cookie 仍有效，用服务端返回的 token 恢复
-  if (result.csrfToken) window.sessionStorage.setItem(CSRF_STORAGE_KEY, result.csrfToken)
+  if (result.csrfToken && typeof window !== 'undefined') window.sessionStorage.setItem(CSRF_STORAGE_KEY, result.csrfToken)
   return result
 }
 
 export async function loginBackend(password: string) {
   const response = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) })
   const result = await response.json() as BackendSession
-  if (result.csrfToken) window.sessionStorage.setItem(CSRF_STORAGE_KEY, result.csrfToken)
+  if (result.csrfToken && typeof window !== 'undefined') window.sessionStorage.setItem(CSRF_STORAGE_KEY, result.csrfToken)
   return result
 }
 
 export async function logoutBackend() {
   await request('/api/auth/logout', { method: 'POST' })
-  window.sessionStorage.removeItem(CSRF_STORAGE_KEY)
+  if (typeof window !== 'undefined') window.sessionStorage.removeItem(CSRF_STORAGE_KEY)
 }
 
 export async function getBackendTasks(params: { page?: number; q?: string; status?: string; favorite?: boolean; collectionId?: string; signal?: AbortSignal } = {}) {

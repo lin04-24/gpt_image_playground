@@ -38,7 +38,6 @@ services:
       dockerfile: deploy/cloud/Dockerfile
     command: ["node", "server/worker/main.mjs"]
     environment:
-      LOGIN_TOKEN: ${LOGIN_TOKEN:?请在 .env 中设置 LOGIN_TOKEN}
       CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?请在 .env 中设置 32 字节 CONFIG_ENCRYPTION_KEY}
       DATABASE_URL: postgresql://gip:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@gip-postgres:5432/gip
       REDIS_URL: redis://gip-redis:6379
