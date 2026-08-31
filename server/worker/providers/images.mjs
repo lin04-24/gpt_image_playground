@@ -4,6 +4,8 @@ const MIME_MAP = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' }
 const PROMPT_REWRITE_GUARD_PREFIX = 'Treat everything after this line as one complete image-generation prompt, including the resolution instruction. Follow it exactly without rewriting or omitting anything:'
 const RAW_RESPONSE_MAX_BYTES = 600_000
 const SENSITIVE_KEY = /api.?key|secret|token|authorization|password|cookie/i
+const MAX_REMOTE_IMAGE_BYTES = Number(process.env.UPSTREAM_IMAGE_MAX_BYTES || 100 * 1024 * 1024)
+const REMOTE_IMAGE_TIMEOUT_MS = Number(process.env.UPSTREAM_IMAGE_TIMEOUT_MS || 120_000)
 
 function getByPath(source, path) {
   if (!path) return source
@@ -135,9 +137,27 @@ async function fetchJson(url, init, timeoutSeconds = 600) {
 }
 
 async function downloadImage(url, fallbackMime) {
-  const response = await fetch(url)
-  if (!response.ok) throw Object.assign(new Error(`读取上游图片失败 (${response.status})`), { status: response.status })
-  return { buffer: Buffer.from(await response.arrayBuffer()), mimeType: response.headers.get('content-type') || fallbackMime, rawImageUrl: url }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Math.max(1_000, REMOTE_IMAGE_TIMEOUT_MS))
+  try {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) throw Object.assign(new Error(`读取上游图片失败 (${response.status})`), { status: response.status })
+    const contentType = String(response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+    if (!/^image\//i.test(contentType)) throw new Error('上游图片 Content-Type 无效')
+    const declaredSize = Number(response.headers.get('content-length') || 0)
+    if (declaredSize > MAX_REMOTE_IMAGE_BYTES) throw new Error('上游图片过大')
+    if (!response.body) throw new Error('上游图片响应为空')
+    const chunks = []
+    let total = 0
+    for await (const chunk of response.body) {
+      total += chunk.length
+      if (total > MAX_REMOTE_IMAGE_BYTES) throw new Error('上游图片过大')
+      chunks.push(chunk)
+    }
+    return { buffer: Buffer.concat(chunks, total), mimeType: contentType || fallbackMime, rawImageUrl: url }
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function extractImages(payload, mapping, fallbackMime) {

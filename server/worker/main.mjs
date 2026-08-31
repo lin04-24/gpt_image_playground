@@ -15,6 +15,24 @@ const database = createDatabase()
 await migrateDatabase(database)
 const redisPair = await createRedisPair()
 const storage = createImageStorage()
+const INPUT_MEMORY_BUDGET = Number(process.env.WORKER_INPUT_MEMORY_BUDGET_BYTES || 512 * 1024 * 1024)
+const INPUT_PIXEL_BUDGET = Number(process.env.WORKER_INPUT_PIXEL_BUDGET || 200_000_000)
+let activeInputBytes = 0
+let activeInputPixels = 0
+const budgetWaiters = []
+async function acquireInputBudget(bytes, pixels) {
+  if (bytes > INPUT_MEMORY_BUDGET || pixels > INPUT_PIXEL_BUDGET) throw new Error('任务输入图片超出 Worker 资源预算')
+  while (activeInputBytes + bytes > INPUT_MEMORY_BUDGET || activeInputPixels + pixels > INPUT_PIXEL_BUDGET) {
+    await new Promise((resolve) => budgetWaiters.push(resolve))
+  }
+  activeInputBytes += bytes
+  activeInputPixels += pixels
+  return () => {
+    activeInputBytes -= bytes
+    activeInputPixels -= pixels
+    while (budgetWaiters.length) budgetWaiters.shift()()
+  }
+}
 const healthFile = process.env.WORKER_HEALTH_FILE || `${storage.dataRoot}/worker.health`
 const touchHealth = () => void writeFile(healthFile, `${Date.now()}\n`).catch(() => undefined)
 touchHealth()
@@ -34,13 +52,19 @@ async function runGeneration(job, context) {
   const provider = task.provider || task.profile_provider || config.provider || 'openai'
   const baseUrl = String(config.baseUrl || config.base_url || '').replace(/\/+$/, '')
   const params = task.params || {}
-  const inputRows = await database.query(`SELECT i.storage_path, i.mime_type FROM task_images ti JOIN images i ON i.id = ti.image_id WHERE ti.task_id = $1 AND ti.role = 'input' ORDER BY ti.position`, [task.id])
-  const maskRow = await database.query(`SELECT i.storage_path, i.mime_type FROM task_images ti JOIN images i ON i.id = ti.image_id WHERE ti.task_id = $1 AND ti.role = 'mask' LIMIT 1`, [task.id])
+  const inputRows = await database.query(`SELECT i.storage_path, i.mime_type, i.byte_size, i.width, i.height FROM task_images ti JOIN images i ON i.id = ti.image_id WHERE ti.task_id = $1 AND ti.role = 'input' ORDER BY ti.position`, [task.id])
+  const maskRow = await database.query(`SELECT i.storage_path, i.mime_type, i.byte_size, i.width, i.height FROM task_images ti JOIN images i ON i.id = ti.image_id WHERE ti.task_id = $1 AND ti.role = 'mask' LIMIT 1`, [task.id])
+  const inputRowsWithMask = [...inputRows.rows, ...(maskRow.rowCount ? [maskRow.rows[0]] : [])]
+  const inputBytes = inputRowsWithMask.reduce((sum, row) => sum + Number(row.byte_size || 0), 0)
+  const inputPixels = inputRowsWithMask.reduce((sum, row) => sum + Number(row.width || 0) * Number(row.height || 0), 0)
+  const releaseInputBudget = await acquireInputBudget(inputBytes, inputPixels)
   const readStored = async (row) => {
     const file = await storage.open(row.storage_path)
     return { buffer: await readFile(file.path), mimeType: row.mime_type }
   }
-  const result = await generateImages({
+  let result
+  try {
+    result = await generateImages({
     provider,
     profileId: task.api_profile_id,
     profileName: task.api_profile_name,
@@ -55,7 +79,11 @@ async function runGeneration(job, context) {
     customProvider: config.customProvider || null,
     prompt: task.transparent_output && task.transparent_prompt ? task.transparent_prompt : task.prompt,
     params,
-    inputImages: await Promise.all(inputRows.rows.map(readStored)),
+    inputImages: await (async () => {
+      const images = []
+      for (const row of inputRows.rows) images.push(await readStored(row))
+      return images
+    })(),
     mask: maskRow.rowCount ? await readStored(maskRow.rows[0]) : null,
     externalJobData: task.external_job_data,
     onExternalJob: async (externalJobData) => {
@@ -67,7 +95,10 @@ async function runGeneration(job, context) {
         await client.query(`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('task.progress', 'task', $1, $2::jsonb)`, [task.id, JSON.stringify({ taskId: task.id, version: updated.rows[0].version })])
       })
     },
-  })
+    })
+  } finally {
+    releaseInputBudget()
+  }
   const images = []
   const outputErrors = Array.isArray(result.failedRequests) ? [...result.failedRequests] : []
   const storedFiles = []

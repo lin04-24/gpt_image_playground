@@ -1,6 +1,6 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { mkdir, open as openFile, rm, stat } from 'node:fs/promises'
 import { resolve as resolvePath } from 'node:path'
 import { redisKeys } from '../redis/keys.mjs'
 import { publishEvent } from '../events/publish.mjs'
@@ -13,6 +13,29 @@ const MAX_IMAGE_BYTES = 600 * 1024 * 1024
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
+}
+
+async function streamMultipartToFile(part, storage) {
+  await mkdir(`${storage.dataRoot}/tmp`, { recursive: true })
+  const path = `${storage.dataRoot}/tmp/${randomUUID()}.upload.part`
+  const handle = await openFile(path, 'wx')
+  const hash = createHash('sha256')
+  let total = 0
+  try {
+    for await (const chunk of part.file) {
+      total += chunk.length
+      if (total > MAX_IMAGE_BYTES) throw Object.assign(new Error('图片过大'), { code: 'IMAGE_TOO_LARGE' })
+      hash.update(chunk)
+      await handle.write(chunk)
+    }
+    await handle.sync()
+    return { path, byteSize: total, contentSha256: hash.digest('hex') }
+  } catch (error) {
+    await rm(path, { force: true })
+    throw error
+  } finally {
+    await handle.close()
+  }
 }
 
 function constantTimeEqual(left, right) {
@@ -277,22 +300,18 @@ export async function buildApp({ database, redis, storage = createImageStorage()
     if (!await requireOperationalWrite(request, reply)) return
     const part = await request.file()
     if (!part) return reply.code(400).send(errorPayload('IMAGE_REQUIRED', '请上传图片'))
-    const chunks = []
-    let total = 0
-    for await (const chunk of part.file) {
-      total += chunk.length
-      if (total > MAX_IMAGE_BYTES) return reply.code(413).send(errorPayload('IMAGE_TOO_LARGE', '图片过大'))
-      chunks.push(chunk)
-    }
+    let uploadPath
     try {
       const requestedId = String(request.headers['x-image-id'] || '')
-      const body = Buffer.concat(chunks)
-      const contentSha256 = createHash('sha256').update(body).digest('hex')
+      const uploaded = await streamMultipartToFile(part, storage)
+      uploadPath = uploaded.path
+      const contentSha256 = uploaded.contentSha256
       if (isSafeImageId(requestedId)) {
         const existing = await database.query('SELECT content_sha256 FROM images WHERE id = $1', [requestedId])
         if (existing.rows[0]?.content_sha256 && existing.rows[0].content_sha256 !== contentSha256) return reply.code(409).send(errorPayload('IMAGE_CONFLICT', '相同图片 ID 的内容摘要不一致'))
       }
-      const image = await storage.putImage(body, { id: isSafeImageId(requestedId) ? requestedId : undefined, mimeType: part.mimetype, source: 'upload' })
+      const image = await storage.putImageFile(uploadPath, { id: isSafeImageId(requestedId) ? requestedId : undefined, mimeType: part.mimetype, source: 'upload' })
+      uploadPath = undefined
       await database.transaction(async (client) => {
         const inserted = await client.query(`INSERT INTO images (id, mime_type, storage_path, source, width, height, byte_size, content_sha256, thumbnail_status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'queued') ON CONFLICT (id) DO NOTHING RETURNING id`, [image.id, image.mimeType, image.storagePath, 'upload', image.width, image.height, image.byteSize, image.contentSha256])
         if (inserted.rowCount) {
@@ -302,6 +321,8 @@ export async function buildApp({ database, redis, storage = createImageStorage()
       })
       return reply.code(201).send({ id: image.id, mimeType: image.mimeType, width: image.width, height: image.height, thumbnailStatus: 'queued' })
     } catch (error) {
+      if (uploadPath) await rm(uploadPath, { force: true }).catch(() => undefined)
+      if (error?.code === 'IMAGE_TOO_LARGE' || error?.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send(errorPayload('IMAGE_TOO_LARGE', '图片过大'))
       return reply.code(400).send(errorPayload('IMAGE_INVALID', error instanceof Error ? error.message : '图片无效'))
     }
   })
@@ -563,29 +584,35 @@ export async function buildApp({ database, redis, storage = createImageStorage()
       if (!sourceId || !isSafeImageId(imageId)) return reply.code(400).send(errorPayload('MIGRATION_PAYLOAD_INVALID', '迁移图片标识无效'))
       const part = await request.file()
       if (!part) return reply.code(400).send(errorPayload('IMAGE_REQUIRED', '请上传图片'))
-      const chunks = []
-      let total = 0
-      for await (const chunk of part.file) {
-        total += chunk.length
-        if (total > MAX_IMAGE_BYTES) return reply.code(413).send(errorPayload('IMAGE_TOO_LARGE', '图片过大'))
-        chunks.push(chunk)
+      let uploadPath
+      let uploaded
+      try {
+        uploaded = await streamMultipartToFile(part, storage)
+        uploadPath = uploaded.path
+      } catch (error) {
+        if (error?.code === 'IMAGE_TOO_LARGE' || error?.code === 'FST_REQ_FILE_TOO_LARGE') return reply.code(413).send(errorPayload('IMAGE_TOO_LARGE', '图片过大'))
+        throw error
       }
-      const body = Buffer.concat(chunks)
-      const digest = sha256(body)
-      const existing = await database.query('SELECT content_sha256 FROM images WHERE id = $1', [imageId])
-      if (existing.rows[0]?.content_sha256 && existing.rows[0].content_sha256 !== digest) {
-        await database.query(`INSERT INTO legacy_import_items (source_type, source_id, content_hash, result, error) VALUES ('browser-image',$1,$2,'conflict','图片摘要冲突') ON CONFLICT (source_type, source_id) DO UPDATE SET content_hash = excluded.content_hash, result = excluded.result, error = excluded.error, imported_at = now()`, [`${sourceId}:${imageId}`, digest])
-        return reply.code(409).send(errorPayload('IMAGE_CONFLICT', '相同图片 ID 的内容摘要不一致'))
-      }
-      if (existing.rowCount) return { sourceId, imported: 0, existing: 1, conflicts: 0 }
-      const stored = await storage.putImage(body, { id: imageId, mimeType: part.mimetype, source: 'upload' })
-      await database.transaction(async (client) => {
+      try {
+        const digest = uploaded.contentSha256
+        const existing = await database.query('SELECT content_sha256 FROM images WHERE id = $1', [imageId])
+        if (existing.rows[0]?.content_sha256 && existing.rows[0].content_sha256 !== digest) {
+          await database.query(`INSERT INTO legacy_import_items (source_type, source_id, content_hash, result, error) VALUES ('browser-image',$1,$2,'conflict','图片摘要冲突') ON CONFLICT (source_type, source_id) DO UPDATE SET content_hash = excluded.content_hash, result = excluded.result, error = excluded.error, imported_at = now()`, [`${sourceId}:${imageId}`, digest])
+          return reply.code(409).send(errorPayload('IMAGE_CONFLICT', '相同图片 ID 的内容摘要不一致'))
+        }
+        if (existing.rowCount) return { sourceId, imported: 0, existing: 1, conflicts: 0 }
+        const stored = await storage.putImageFile(uploadPath, { id: imageId, mimeType: part.mimetype, source: 'upload' })
+        uploadPath = undefined
+        await database.transaction(async (client) => {
         await client.query(`INSERT INTO images (id,mime_type,storage_path,source,width,height,byte_size,content_sha256,thumbnail_status) VALUES ($1,$2,$3,'legacy',$4,$5,$6,$7,'queued') ON CONFLICT DO NOTHING`, [stored.id, stored.mimeType, stored.storagePath, stored.width, stored.height, stored.byteSize, stored.contentSha256])
         const job = await client.query(`INSERT INTO jobs (kind, target_id, payload) VALUES ('thumbnail', $1, '{}'::jsonb) ON CONFLICT DO NOTHING RETURNING id`, [stored.id])
         if (job.rowCount) await client.query(`INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload) VALUES ('job.enqueue', 'job', $1, $2::jsonb)`, [job.rows[0].id, JSON.stringify({ jobId: job.rows[0].id, kind: 'thumbnail', targetId: stored.id })])
         await client.query(`INSERT INTO legacy_import_items (source_type, source_id, content_hash, result) VALUES ('browser-image',$1,$2,'imported') ON CONFLICT (source_type, source_id) DO UPDATE SET content_hash = excluded.content_hash, result = excluded.result, error = NULL, imported_at = now()`, [`${sourceId}:${imageId}`, digest])
-      })
-      return { sourceId, imported: 1, existing: 0, conflicts: 0 }
+        })
+        return { sourceId, imported: 1, existing: 0, conflicts: 0 }
+      } finally {
+        if (uploadPath) await rm(uploadPath, { force: true }).catch(() => undefined)
+      }
     }
     const body = request.body || {}
     if (body && Array.isArray(body.images)) {

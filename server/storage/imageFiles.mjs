@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { link, mkdir, open as openFile, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import sharp from 'sharp'
@@ -72,6 +73,41 @@ export function createImageStorage(root = process.env.IMAGE_DATA_DIR || './data'
     }
   }
 
+  async function putImageFile(sourcePath, options = {}) {
+    const source = resolve(sourcePath)
+    try {
+      const sourceStat = await stat(source)
+      if (!sourceStat.isFile() || !sourceStat.size) throw new Error('图片内容为空')
+      const metadata = await sharp(source).metadata()
+      if (!metadata.format) throw new Error('无法解析图片')
+      const hash = createHash('sha256')
+      for await (const chunk of createReadStream(source)) hash.update(chunk)
+      const contentSha256 = hash.digest('hex')
+      const id = options.id || contentSha256
+      if (!isSafeImageId(id)) throw new Error('图片 ID 无效')
+      const relativePath = imageRelativePath(id)
+      const target = absolute(relativePath)
+      await mkdir(dirname(target), { recursive: true })
+      if (await publishWithoutOverwrite(source, target)) {
+        const existingHash = createHash('sha256')
+        for await (const chunk of createReadStream(target)) existingHash.update(chunk)
+        if (existingHash.digest('hex') !== contentSha256) throw new Error('图片 ID 内容摘要冲突')
+      }
+      return {
+        id,
+        storagePath: relativePath.replaceAll('\\', '/'),
+        mimeType: options.mimeType || `image/${metadata.format === 'jpg' ? 'jpeg' : metadata.format}`,
+        width: metadata.width || null,
+        height: metadata.height || null,
+        byteSize: sourceStat.size,
+        contentSha256,
+      }
+    } catch (error) {
+      await rm(source, { force: true })
+      throw error
+    }
+  }
+
   async function putThumbnail(id, buffer, mimeType = 'image/webp') {
     if (!isSafeImageId(id)) throw new Error('图片 ID 无效')
     const relativePath = thumbnailRelativePath(id)
@@ -110,5 +146,5 @@ export function createImageStorage(root = process.env.IMAGE_DATA_DIR || './data'
     await rm(absolute(relativePath), { force: true })
   }
 
-  return { dataRoot, imageRelativePath, thumbnailRelativePath, putImage, putThumbnail, createThumbnail, open, remove }
+  return { dataRoot, imageRelativePath, thumbnailRelativePath, putImage, putImageFile, putThumbnail, createThumbnail, open, remove }
 }
