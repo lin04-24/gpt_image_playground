@@ -19,10 +19,12 @@ ENV PORT=3000
 ENV STATIC_DIR=/app/dist
 ENV IMAGE_DATA_DIR=/app/data
 
+# 不复用 build stage 的 node_modules：只装生产依赖，构建工具链（vite/wrangler 等）不进运行镜像
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/node_modules ./node_modules
 
 VOLUME ["/app/data"]
 

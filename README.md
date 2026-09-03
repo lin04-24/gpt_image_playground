@@ -1,5 +1,16 @@
 # GPT Image Playground
 
+## V4.2.0 功能情况
+
+V4.2.0 完成云端部署镜像瘦身，版本标签为 `V4.2.0`。
+
+- `deploy/cloud/Dockerfile` 运行镜像原先复制构建阶段的完整 `node_modules`，Vite、TypeScript、Vitest、Wrangler、jsdom 等构建/测试工具链全部进入生产环境：镜像内该层 483MB、镜像总体积 838MB。
+- 现在运行阶段单独 `npm ci --omit=dev` 只安装生产依赖：镜像内 node_modules 降至 143MB、镜像总体积降至 488MB（约 -42%），同时缩小漏洞暴露面与扫描成本。
+- 运行依赖层只在 lockfile 变化时失效，日常改源码不再击穿依赖缓存；运行阶段自装依赖也保证跨平台构建时 sharp 原生二进制按目标平台解析，不再从构建阶段复制。
+- 已核对 server 运行时全部外部依赖均来自 `dependencies`；不改数据库结构与公开 API，标准 `docker compose up -d --build` 流程不受影响。
+
+验证：`npm run build`、`npm test`（35 个测试文件，270 项测试）与 `docker build` 真实构建均已通过。
+
 ## V4.1.5 功能情况
 
 V4.1.5 加固收藏关系写接口的校验与错误处理，版本标签为 `V4.1.5`。

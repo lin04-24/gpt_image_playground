@@ -1,3 +1,21 @@
+# V4.2.0（2026-09-03）
+
+### 功能
+- 云端部署镜像瘦身：`deploy/cloud/Dockerfile` 运行镜像原先直接复制构建阶段的完整 `node_modules`，Vite、TypeScript、Vitest、Wrangler、jsdom、Tailwind 等构建/测试工具链全部进入生产环境（镜像内 node_modules 层 483MB、镜像总体积 838MB）。现在运行阶段单独执行 `npm ci --omit=dev` 只安装生产依赖：镜像内 node_modules 降至 143MB，镜像总体积降至 488MB（约 -42%），同时缩小漏洞暴露面与扫描成本。
+
+### 实现说明
+- 运行阶段不再 `COPY --from=build /app/node_modules`，改为复制 `package.json`/`package-lock.json` 后 `RUN npm ci --omit=dev`。已核对 server 运行时的全部外部依赖（fastify 系列为动态 `import()` 引入，同属 `dependencies`）：fastify、@fastify/cookie、@fastify/cors、@fastify/multipart、@fastify/static、pg、redis、sharp、@fal-ai/client，无一来自 devDependencies。
+- 选择运行阶段独立安装而非构建后 `npm prune --omit=dev`：运行依赖层只在 lockfile 变化时失效，日常改源码不再击穿该层缓存；且 build stage 被 `--platform=$BUILDPLATFORM` 固定在构建机架构，跨平台构建时复制其 node_modules 会带入错误架构的 sharp 原生二进制，运行阶段自装则按目标平台正确解析。
+- 构建阶段的完整 `npm ci`（前端构建需要 devDependencies）行为不变；`docker compose` 的 API 与 Worker 共用该镜像，双双受益。server 目录内 `*.test.mjs` 仍随 `COPY server` 进入镜像，但仅测试执行器运行，生产路径不触发，维持现状。
+
+### 升级说明
+- 未修改数据库结构、持久化字段或公开 API；无需迁移操作。标准 `docker compose up -d --build` 流程不受影响。
+
+### 验证
+- `npm run build` 通过。
+- `npm test` 通过（35 个测试文件，270 项测试）。
+- `docker build` 真实构建通过；镜像内确认运行依赖齐全、dev 工具链不存在；API/Worker 入口补齐环境变量后完整加载模块图至预期的数据库连接失败，无模块解析错误。
+
 # V4.1.5（2026-08-31）
 
 ### 功能
